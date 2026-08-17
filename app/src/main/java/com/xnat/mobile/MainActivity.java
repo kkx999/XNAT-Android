@@ -408,7 +408,7 @@ public class MainActivity extends Activity {
         contentHost = new FrameLayout(this);
         shell.addView(contentHost, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
         navBar = buildBottomNav();
-        shell.addView(navBar, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(78)));
+        shell.addView(navBar, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(74)));
         root.addView(shell, match());
         selectTab(tab);
     }
@@ -416,14 +416,16 @@ public class MainActivity extends Activity {
     private LinearLayout buildBottomNav() {
         LinearLayout wrap = column();
         wrap.setBackgroundColor(BG);
-        wrap.setPadding(dp(10), dp(5), dp(10), dp(8));
+        // Keep the navigation visually separated by a hairline instead of a heavy
+        // elevation shadow. This avoids the dirty grey edges visible on light themes.
+        wrap.setPadding(dp(12), dp(4), dp(12), dp(8));
 
         LinearLayout row = horizontalRow();
         row.setTag("nav_row");
         row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(dp(4), dp(4), dp(4), dp(4));
-        row.setBackground(roundRect(CARD, dp(22), BORDER, 1));
-        if (!darkModeActive) row.setElevation(dp(2));
+        row.setPadding(dp(2), dp(2), dp(2), dp(2));
+        row.setBackground(roundRect(CARD, dp(21), BORDER, 1));
+        row.setElevation(0f);
         row.addView(navItem("首页", TAB_HOME), navCellWeight());
         row.addView(navItem("服务", TAB_SERVICES), navCellWeight());
         row.addView(navItem("账务", TAB_BILLING), navCellWeight());
@@ -437,7 +439,7 @@ public class MainActivity extends Activity {
         LinearLayout item = column();
         item.setGravity(Gravity.CENTER);
         item.setTag(tab);
-        item.setPadding(dp(4), dp(5), dp(4), dp(4));
+        item.setPadding(dp(3), dp(4), dp(3), dp(3));
 
         NavIconView icon = new NavIconView(tab);
         icon.setTag("icon");
@@ -470,7 +472,9 @@ public class MainActivity extends Activity {
             label.setTextColor(active ? BLUE : MUTED);
             label.setTypeface(Typeface.DEFAULT, active ? Typeface.BOLD : Typeface.NORMAL);
             label.setAlpha(active ? 1f : 0.78f);
-            item.setBackground(rippleRoundRect(active ? BLUE_SOFT : Color.TRANSPARENT, 15, 0, RIPPLE));
+            // The selected surface is intentionally compact and low-contrast; the
+            // blue icon/label carry the state, not a large block of blue fill.
+            item.setBackground(rippleRoundRect(active ? SOFT_BLUE : Color.TRANSPARENT, 14, 0, RIPPLE));
             item.animate().cancel();
             item.setScaleX(1f);
             item.setScaleY(1f);
@@ -1122,11 +1126,12 @@ public class MainActivity extends Activity {
                     View child = options.getChildAt(x);
                     if (!(child instanceof LinearLayout)) continue;
                     boolean selected = ("purchase-image-" + selectedIndex[0]).equals(String.valueOf(child.getTag()));
-                    child.setBackground(roundRect(selected ? BLUE_SOFT : CARD, dp(16), selected ? BLUE : BORDER, 1));
+                    child.setBackground(roundRect(selected ? BLUE_SOFT : SOFT, dp(18), selected ? BLUE : 0, selected ? 1 : 0));
                     TextView mark = child.findViewWithTag("image-mark");
                     if (mark != null) {
                         mark.setText(selected ? "✓ 已选择" : "选择");
                         mark.setTextColor(selected ? BLUE : MUTED);
+                        mark.setBackground(roundRect(selected ? SOFT_BLUE : Color.TRANSPARENT, dp(12), 0, 0));
                     }
                 }
                 if (nextRef[0] != null) setActionEnabled(nextRef[0], true);
@@ -2387,11 +2392,12 @@ public class MainActivity extends Activity {
                     View child = options.getChildAt(x);
                     if (child instanceof LinearLayout) {
                         boolean chosen = ("image-option-" + selectedIndex[0]).equals(String.valueOf(child.getTag()));
-                        child.setBackground(roundRect(chosen ? BLUE_SOFT : CARD, dp(16), chosen ? BLUE : BORDER, 1));
+                        child.setBackground(roundRect(chosen ? BLUE_SOFT : SOFT, dp(18), chosen ? BLUE : 0, chosen ? 1 : 0));
                         TextView mark = child.findViewWithTag("image-mark");
                         if (mark != null) {
                             mark.setText(chosen ? "✓ 已选择" : "选择");
                             mark.setTextColor(chosen ? BLUE : MUTED);
+                            mark.setBackground(roundRect(chosen ? SOFT_BLUE : Color.TRANSPARENT, dp(12), 0, 0));
                         }
                     }
                 }
@@ -2430,8 +2436,15 @@ public class MainActivity extends Activity {
     private LinearLayout systemImageOption(String name, String alias, boolean current, boolean selected) {
         LinearLayout option = horizontalRow();
         option.setGravity(Gravity.CENTER_VERTICAL);
-        option.setPadding(dp(14), dp(12), dp(14), dp(12));
-        option.setBackground(roundRect(selected ? BLUE_SOFT : CARD, dp(16), selected ? BLUE : BORDER, 1));
+        option.setPadding(dp(12), dp(11), dp(13), dp(11));
+        // Use a soft filled surface instead of a hard grey outline on every row.
+        // Selection still gets the brand border so the state remains unambiguous.
+        option.setBackground(roundRect(selected ? BLUE_SOFT : SOFT, dp(18), selected ? BLUE : 0, selected ? 1 : 0));
+
+        String iconIdentity = (name == null ? "" : name) + " " + (alias == null ? "" : alias);
+        option.addView(new SystemIconView(iconIdentity), new LinearLayout.LayoutParams(dp(40), dp(40)));
+        gapH(option, 12);
+
         LinearLayout labels = column();
         LinearLayout nameRow = horizontalRow();
         nameRow.setGravity(Gravity.CENTER_VERTICAL);
@@ -2447,8 +2460,12 @@ public class MainActivity extends Activity {
             labels.addView(aliasView);
         }
         option.addView(labels, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+
         TextView mark = text(selected ? "✓ 已选择" : "选择", 12, selected ? BLUE : MUTED, true);
         mark.setTag("image-mark");
+        mark.setGravity(Gravity.CENTER);
+        mark.setPadding(dp(10), dp(7), dp(10), dp(7));
+        mark.setBackground(roundRect(selected ? SOFT_BLUE : Color.TRANSPARENT, dp(12), 0, 0));
         option.addView(mark);
         return option;
     }
@@ -3688,6 +3705,85 @@ public class MainActivity extends Activity {
         }
     }
 
+    private final class SystemIconView extends View {
+        private final String identity;
+        private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+
+        SystemIconView(String identity) {
+            super(MainActivity.this);
+            this.identity = identity == null ? "" : identity.trim().toLowerCase();
+        }
+
+        @Override
+        protected void onDraw(Canvas canvas) {
+            super.onDraw(canvas);
+            float w = getWidth();
+            float h = getHeight();
+            float cx = w / 2f;
+            float cy = h / 2f;
+            int accent;
+            if (identity.contains("ubuntu")) accent = Color.rgb(233, 84, 32);
+            else if (identity.contains("debian")) accent = Color.rgb(215, 10, 83);
+            else if (identity.contains("centos")) accent = Color.rgb(147, 75, 176);
+            else if (identity.contains("rocky")) accent = Color.rgb(16, 142, 97);
+            else if (identity.contains("alma")) accent = Color.rgb(0, 149, 166);
+            else if (identity.contains("arch")) accent = Color.rgb(23, 147, 209);
+            else accent = BLUE;
+
+            paint.setStyle(Paint.Style.FILL);
+            paint.setColor(Color.argb(darkModeActive ? 54 : 22, Color.red(accent), Color.green(accent), Color.blue(accent)));
+            canvas.drawRoundRect(new RectF(dp(1), dp(1), w - dp(1), h - dp(1)), dp(12), dp(12), paint);
+
+            paint.setColor(accent);
+            paint.setStrokeCap(Paint.Cap.ROUND);
+            paint.setStrokeJoin(Paint.Join.ROUND);
+
+            if (identity.contains("ubuntu")) {
+                paint.setStyle(Paint.Style.STROKE);
+                paint.setStrokeWidth(dp(2.2f));
+                canvas.drawCircle(cx, cy, dp(7.0f), paint);
+                paint.setStyle(Paint.Style.FILL);
+                for (int i = 0; i < 3; i++) {
+                    double a = Math.toRadians(-90 + i * 120);
+                    float px = cx + (float) Math.cos(a) * dp(8.4f);
+                    float py = cy + (float) Math.sin(a) * dp(8.4f);
+                    canvas.drawCircle(px, py, dp(2.25f), paint);
+                    paint.setColor(darkModeActive ? CARD : Color.WHITE);
+                    canvas.drawCircle(px, py, dp(0.85f), paint);
+                    paint.setColor(accent);
+                }
+            } else if (identity.contains("debian")) {
+                paint.setStyle(Paint.Style.STROKE);
+                paint.setStrokeWidth(dp(2.1f));
+                RectF outer = new RectF(cx - dp(8.5f), cy - dp(8.2f), cx + dp(8.5f), cy + dp(8.2f));
+                canvas.drawArc(outer, 205, 290, false, paint);
+                paint.setStrokeWidth(dp(1.8f));
+                RectF inner = new RectF(cx - dp(5.2f), cy - dp(5.0f), cx + dp(5.2f), cy + dp(5.0f));
+                canvas.drawArc(inner, 250, 235, false, paint);
+                paint.setStyle(Paint.Style.FILL);
+                canvas.drawCircle(cx + dp(2.0f), cy - dp(0.6f), dp(1.0f), paint);
+            } else if (identity.contains("arch")) {
+                paint.setStyle(Paint.Style.STROKE);
+                paint.setStrokeWidth(dp(2.2f));
+                canvas.drawLine(cx - dp(7), cy + dp(7), cx, cy - dp(8), paint);
+                canvas.drawLine(cx, cy - dp(8), cx + dp(7), cy + dp(7), paint);
+                canvas.drawLine(cx - dp(3.6f), cy + dp(1.0f), cx + dp(3.6f), cy + dp(1.0f), paint);
+            } else {
+                String letter = "L";
+                if (identity.contains("centos")) letter = "C";
+                else if (identity.contains("rocky")) letter = "R";
+                else if (identity.contains("alma")) letter = "A";
+                else if (!identity.isEmpty()) letter = identity.substring(0, 1).toUpperCase();
+                paint.setStyle(Paint.Style.FILL);
+                paint.setTextAlign(Paint.Align.CENTER);
+                paint.setTypeface(Typeface.DEFAULT_BOLD);
+                paint.setTextSize(dp(15));
+                Paint.FontMetrics fm = paint.getFontMetrics();
+                canvas.drawText(letter, cx, cy - (fm.ascent + fm.descent) / 2f, paint);
+            }
+        }
+    }
+
     private final class NavIconView extends View {
         private final int type;
         private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -3793,7 +3889,9 @@ public class MainActivity extends Activity {
 
     private LinearLayout.LayoutParams navCellWeight() {
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1);
-        lp.setMargins(dp(2), 0, dp(2), 0);
+        // More breathing room keeps the active capsule from filling an entire fifth
+        // of the navigation rail and removes the chunky look from the first RC.
+        lp.setMargins(dp(5), dp(4), dp(5), dp(4));
         return lp;
     }
 
