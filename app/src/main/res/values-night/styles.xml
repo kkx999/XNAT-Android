@@ -1,0 +1,17 @@
+<resources>
+    <style name="AppTheme" parent="android:style/Theme.Material.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:statusBarColor">#050F1D</item>
+        <item name="android:navigationBarColor">#050F1D</item>
+        <item name="android:windowLightNavigationBar">false</item>
+        <item name="android:colorAccent">#408EFF</item>
+        <item name="android:windowActionModeOverlay">true</item>
+        <item name="android:windowBackground">#050F1D</item>
+    </style>
+
+    <style name="XnatBottomSheetAnimation">
+        <item name="android:windowEnterAnimation">@anim/xnat_sheet_in</item>
+        <item name="android:windowExitAnimation">@anim/xnat_sheet_out</item>
+    </style>
+</resources>

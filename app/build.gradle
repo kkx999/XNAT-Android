@@ -1,0 +1,85 @@
+plugins {
+    id 'com.android.application'
+}
+
+def releaseKeystoreFile = System.getenv('XNAT_KEYSTORE_FILE')
+def releaseStorePassword = System.getenv('XNAT_KEYSTORE_PASSWORD')
+def releaseKeyAlias = System.getenv('XNAT_KEY_ALIAS')
+def releaseKeyPassword = System.getenv('XNAT_KEY_PASSWORD')
+def isReleaseBuild = gradle.startParameter.taskNames.any { it.toLowerCase().contains('release') }
+
+if (isReleaseBuild && (!releaseKeystoreFile || !releaseStorePassword || !releaseKeyAlias || !releaseKeyPassword)) {
+    throw new GradleException('Release signing is not configured. Set XNAT_KEYSTORE_FILE, XNAT_KEYSTORE_PASSWORD, XNAT_KEY_ALIAS, and XNAT_KEY_PASSWORD.')
+}
+
+android {
+    namespace 'com.xnat.mobile'
+    compileSdk 36
+
+    defaultConfig {
+        applicationId 'com.xnat.mobile'
+        minSdk 26
+        targetSdk 36
+        versionCode 10014
+        versionName '1.0.0'
+        manifestPlaceholders = [usesCleartextTraffic: 'false']
+    }
+
+    signingConfigs {
+        release {
+            if (releaseKeystoreFile) {
+                storeFile file(releaseKeystoreFile)
+                storePassword releaseStorePassword
+                keyAlias releaseKeyAlias
+                keyPassword releaseKeyPassword
+            }
+        }
+    }
+
+    buildTypes {
+        debug {
+            // Local debug builds may temporarily connect to an http:// Panel.
+            // The app displays a warning before sending credentials.
+            manifestPlaceholders = [usesCleartextTraffic: 'true']
+        }
+        release {
+            signingConfig signingConfigs.release
+            minifyEnabled false
+            manifestPlaceholders = [usesCleartextTraffic: 'false']
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+// GitHub browser uploads may leave obsolete launcher resources from old commits.
+// Remove only conflicting legacy launcher files before Android resource merging.
+tasks.register('sanitizeLegacyLauncherResources') {
+    doLast {
+        def legacyFiles = fileTree('src/main/res') {
+            include 'mipmap-*-v4/ic_launcher*'
+            include 'mipmap-*/ic_launcher.xml'
+            include 'mipmap-*/ic_launcher_round.xml'
+            exclude 'mipmap-anydpi-v26/**'
+        }.files
+
+        if (!legacyFiles.isEmpty()) {
+            println 'Removing legacy launcher resources:'
+            legacyFiles.sort { a, b -> a.path <=> b.path }.each { println "  ${it}" }
+            delete legacyFiles
+        } else {
+            println 'No legacy launcher resources found.'
+        }
+    }
+}
+
+tasks.named('preBuild').configure {
+    dependsOn tasks.named('sanitizeLegacyLauncherResources')
+}
+
+dependencies {
+    implementation "androidx.swiperefreshlayout:swiperefreshlayout:1.2.0"
+}
