@@ -216,44 +216,47 @@ public class MainActivity extends Activity {
 
         gap(page, 34);
 
-        LinearLayout card = surfaceCard(26);
-        card.setPadding(dp(22), dp(22), dp(22), dp(22));
+        LinearLayout card = roundedBox(CARD, 30, 0, 0);
+        card.setPadding(dp(22), dp(24), dp(22), dp(22));
         page.addView(card, matchWrap());
 
-        LinearLayout titleRow = horizontalRow();
-        titleRow.setGravity(Gravity.CENTER_VERTICAL);
         LinearLayout titleCopy = column();
         titleCopy.addView(text("欢迎回来", 25, INK, true));
         TextView desc = text("登录后即可管理服务、账务与支持。", 12, MUTED, false);
         desc.setPadding(0, dp(4), 0, 0);
         titleCopy.addView(desc);
-        titleRow.addView(titleCopy, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
-        titleRow.addView(pill("安全登录", BLUE, BLUE_SOFT));
-        card.addView(titleRow, matchWrap());
+        card.addView(titleCopy, matchWrap());
         gap(card, 22);
 
         card.addView(fieldLabel("用户名"));
         gap(card, 7);
-        usernameInput = input("请输入用户名", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_NORMAL);
+        usernameInput = loginInput("请输入用户名", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_NORMAL);
         usernameInput.setText(prefs.getString("username", ""));
         usernameInput.setImeOptions(EditorInfo.IME_ACTION_NEXT);
-        card.addView(usernameInput, matchWrap());
+        card.addView(usernameInput, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(56)));
         gap(card, 16);
 
         card.addView(fieldLabel("密码"));
         gap(card, 7);
-        LinearLayout passwordShell = roundedBox(SOFT, 15, BORDER, 1);
+        LinearLayout passwordShell = horizontalRow();
         passwordShell.setGravity(Gravity.CENTER_VERTICAL);
+        passwordShell.setBackground(roundRect(SOFT, dp(18), BORDER, 1));
         passwordInput = loginBareInput("请输入密码", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
         passwordInput.setImeOptions(EditorInfo.IME_ACTION_DONE);
-        passwordShell.addView(passwordInput, new LinearLayout.LayoutParams(0, dp(54), 1));
+        passwordShell.addView(passwordInput, new LinearLayout.LayoutParams(0, dp(56), 1));
         passwordToggle = text("显示", 12, BLUE, true);
         passwordToggle.setGravity(Gravity.CENTER);
-        passwordToggle.setPadding(dp(12), dp(10), dp(14), dp(10));
-        passwordToggle.setBackground(rippleRoundRect(Color.TRANSPARENT, 12, 0, RIPPLE));
+        passwordToggle.setPadding(dp(12), 0, dp(12), 0);
+        passwordToggle.setBackground(rippleRoundRect(Color.TRANSPARENT, 14, 0, RIPPLE));
         passwordToggle.setOnClickListener(v -> togglePasswordVisibility());
-        passwordShell.addView(passwordToggle, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(50)));
-        card.addView(passwordShell, matchWrap());
+        LinearLayout.LayoutParams toggleLp = new LinearLayout.LayoutParams(dp(58), dp(44));
+        toggleLp.rightMargin = dp(4);
+        passwordShell.addView(passwordToggle, toggleLp);
+        passwordShell.setOnClickListener(v -> {
+            passwordInput.requestFocus();
+            passwordInput.setSelection(passwordInput.length());
+        });
+        card.addView(passwordShell, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(56)));
 
         totpInput = input("请输入两步验证码", InputType.TYPE_CLASS_NUMBER);
         totpInput.setImeOptions(EditorInfo.IME_ACTION_DONE);
@@ -286,6 +289,8 @@ public class MainActivity extends Activity {
 
         gap(card, 20);
         loginButton = primaryButton("登录");
+        loginButton.setMinHeight(dp(56));
+        loginButton.setBackground(rippleRoundRect(BLUE, 18, 0, Color.argb(42, 255, 255, 255)));
         loginButton.setOnClickListener(v -> login());
         card.addView(loginButton, matchWrap());
 
@@ -297,24 +302,22 @@ public class MainActivity extends Activity {
         busyLp.topMargin = dp(12);
         card.addView(loginBusy, busyLp);
 
-        LinearLayout security = roundedBox(BLUE_SOFT, 16, 0, 0);
-        security.setPadding(dp(14), dp(12), dp(14), dp(12));
         LinearLayout securityRow = horizontalRow();
-        securityRow.setGravity(Gravity.CENTER_VERTICAL);
+        securityRow.setGravity(Gravity.CENTER);
         boolean secureTransport = baseUrl.startsWith("https://");
         View dot = new View(this);
         dot.setBackground(roundRect(secureTransport ? GREEN : AMBER, dp(99), 0, 0));
-        securityRow.addView(dot, new LinearLayout.LayoutParams(dp(8), dp(8)));
-        gapH(securityRow, 9);
+        securityRow.addView(dot, new LinearLayout.LayoutParams(dp(7), dp(7)));
+        gapH(securityRow, 8);
         String securityText = secureTransport
-                ? "HTTPS 安全连接 · 登录令牌由 Android Keystore 加密保存"
+                ? "HTTPS 安全连接 · 凭据由 Android Keystore 加密保存"
                 : "HTTP 测试连接 · 仅建议临时调试使用";
-        securityRow.addView(text(securityText, 11, MUTED, false),
-                new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
-        security.addView(securityRow, matchWrap());
+        TextView securityTextView = text(securityText, 10, MUTED, false);
+        securityTextView.setAlpha(0.86f);
+        securityRow.addView(securityTextView);
         LinearLayout.LayoutParams secLp = matchWrap();
-        secLp.topMargin = dp(14);
-        page.addView(security, secLp);
+        secLp.topMargin = dp(18);
+        page.addView(securityRow, secLp);
 
         TextView footer = text("XNAT Android v1.1.0", 10, MUTED, false);
         footer.setGravity(Gravity.CENTER_HORIZONTAL);
@@ -3088,6 +3091,13 @@ public class MainActivity extends Activity {
         return label;
     }
 
+    private EditText loginInput(String hint, int inputType) {
+        EditText e = loginBareInput(hint, inputType);
+        e.setPadding(dp(16), 0, dp(16), 0);
+        e.setBackground(roundRect(SOFT, dp(18), BORDER, 1));
+        return e;
+    }
+
     private EditText loginBareInput(String hint, int inputType) {
         EditText e = new EditText(this);
         e.setHint(hint);
@@ -3096,8 +3106,10 @@ public class MainActivity extends Activity {
         e.setHintTextColor(MUTED);
         e.setSingleLine(true);
         e.setInputType(inputType);
-        e.setPadding(dp(14), 0, dp(6), 0);
-        e.setMinHeight(dp(54));
+        e.setGravity(Gravity.CENTER_VERTICAL);
+        e.setIncludeFontPadding(false);
+        e.setPadding(dp(16), 0, dp(6), 0);
+        e.setMinHeight(dp(56));
         e.setBackgroundColor(Color.TRANSPARENT);
         return e;
     }

@@ -40,7 +40,7 @@ XNAT 官方原生 Android 客户端。
 
 - Application ID: `com.xnat.mobile`
 - Version Name: `1.1.0`
-- Version Code: `10100`
+- Version Code: `10101`
 - Min SDK: 26
 - Target / Compile SDK: 36
 - Android Gradle Plugin: 8.13.2
@@ -68,4 +68,4 @@ XNAT 官方原生 Android 客户端。
 - APK: `XNAT-Android-v1.1.0.apk`
 - SHA-256: `XNAT-Android-v1.1.0.apk.sha256`
 
-v1.1.0 的 Version Code 为 `10100`，高于 v1.0.0 的 `10014`。继续使用同一正式签名证书时可直接覆盖升级，并保留本地登录与主题数据。
+v1.1.0 的 Version Code 为 `10101`，高于 v1.0.0 的 `10014`。继续使用同一正式签名证书时可直接覆盖升级，并保留本地登录与主题数据。
