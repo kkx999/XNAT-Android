@@ -15,6 +15,8 @@ import android.content.res.Configuration;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.Paint;
+import android.graphics.RectF;
 import android.graphics.Typeface;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.GradientDrawable;
@@ -34,6 +36,7 @@ import android.view.WindowInsets;
 import android.view.WindowInsetsController;
 import android.view.WindowManager;
 import android.view.animation.OvershootInterpolator;
+import android.view.inputmethod.EditorInfo;
 import android.view.animation.PathInterpolator;
 import android.widget.Button;
 import android.widget.EditText;
@@ -70,18 +73,21 @@ public class MainActivity extends Activity {
     private long pausedAt = 0L;
     private boolean resumedOnce = false;
 
+    private static final String DEFAULT_BASE_URL = "https://xnat.666101.xyz";
+
     private SharedPreferences prefs;
     private LinearLayout root;
-    private String baseUrl = "";
+    private String baseUrl = DEFAULT_BASE_URL;
     private String token = "";
 
-    private EditText urlInput;
     private EditText usernameInput;
     private EditText passwordInput;
     private EditText totpInput;
+    private TextView passwordToggle;
     private Button loginButton;
     private ProgressBar loginBusy;
     private boolean insecureHttpAcknowledged = false;
+    private boolean passwordVisible = false;
 
     private FrameLayout contentHost;
     private LinearLayout navBar;
@@ -149,7 +155,11 @@ public class MainActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         prefs = getSharedPreferences("xnat", MODE_PRIVATE);
-        baseUrl = prefs.getString("base_url", "");
+        baseUrl = ApiClient.normalizeBase(prefs.getString("base_url", DEFAULT_BASE_URL));
+        if (!ApiClient.isValidBaseUrl(baseUrl) || (!isDebugBuild() && !baseUrl.startsWith("https://"))) {
+            baseUrl = DEFAULT_BASE_URL;
+            prefs.edit().putString("base_url", baseUrl).apply();
+        }
         token = SecureTokenStore.load(prefs);
         applyThemePalette();
 
@@ -169,75 +179,159 @@ public class MainActivity extends Activity {
     private void showLogin() {
         inDetail = false;
         screenGeneration++;
+        passwordVisible = false;
         root.removeAllViews();
 
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
         LinearLayout page = column();
-        page.setPadding(dp(22), dp(34), dp(22), dp(34));
+        page.setPadding(dp(22), dp(28), dp(22), dp(34));
         scroll.addView(page);
         root.addView(scroll, match());
 
-        page.addView(text("XNAT", 36, INK, true));
-        TextView sub = text("Android 客户端", 14, MUTED, false);
-        sub.setPadding(0, dp(4), 0, dp(28));
-        page.addView(sub);
+        LinearLayout brand = horizontalRow();
+        brand.setGravity(Gravity.CENTER_VERTICAL);
+        TextView brandMark = text("X", 20, Color.WHITE, true);
+        brandMark.setGravity(Gravity.CENTER);
+        brandMark.setBackground(gradientRoundRect(NAVY, NAVY_2, 14));
+        brand.addView(brandMark, new LinearLayout.LayoutParams(dp(46), dp(46)));
+        gapH(brand, 12);
+        LinearLayout brandCopy = column();
+        TextView brandTitle = text("XNAT", 31, INK, true);
+        brandCopy.addView(brandTitle);
+        TextView brandSub = text("服务器管理客户端", 12, MUTED, false);
+        brandSub.setPadding(0, dp(1), 0, 0);
+        brandCopy.addView(brandSub);
+        brand.addView(brandCopy, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        page.addView(brand, matchWrap());
 
-        LinearLayout card = surfaceCard(22);
+        View.OnLongClickListener advancedEntry = v -> {
+            subtleHaptic(v);
+            showAdvancedServerSettings();
+            return true;
+        };
+        brand.setOnLongClickListener(advancedEntry);
+        brandMark.setOnLongClickListener(advancedEntry);
+        brandTitle.setOnLongClickListener(advancedEntry);
+
+        gap(page, 34);
+
+        LinearLayout card = surfaceCard(26);
         card.setPadding(dp(22), dp(22), dp(22), dp(22));
         page.addView(card, matchWrap());
 
-        card.addView(text("登录到 XNAT", 22, INK, true));
-        TextView desc = text("连接你的 Panel，管理服务状态与电源操作。", 13, MUTED, false);
-        desc.setPadding(0, dp(6), 0, dp(20));
-        card.addView(desc);
+        LinearLayout titleRow = horizontalRow();
+        titleRow.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout titleCopy = column();
+        titleCopy.addView(text("欢迎回来", 25, INK, true));
+        TextView desc = text("登录后即可管理服务、账务与支持。", 12, MUTED, false);
+        desc.setPadding(0, dp(4), 0, 0);
+        titleCopy.addView(desc);
+        titleRow.addView(titleCopy, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        titleRow.addView(pill("安全登录", BLUE, BLUE_SOFT));
+        card.addView(titleRow, matchWrap());
+        gap(card, 22);
 
-        urlInput = input("Panel 地址，例如 https://panel.example.com", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
-        urlInput.setText(baseUrl);
-        card.addView(urlInput, matchWrap());
-        gap(card, 12);
-
-        usernameInput = input("用户名", InputType.TYPE_CLASS_TEXT);
+        card.addView(fieldLabel("用户名"));
+        gap(card, 7);
+        usernameInput = input("请输入用户名", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_NORMAL);
         usernameInput.setText(prefs.getString("username", ""));
+        usernameInput.setImeOptions(EditorInfo.IME_ACTION_NEXT);
         card.addView(usernameInput, matchWrap());
-        gap(card, 12);
-
-        passwordInput = input("密码", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
-        card.addView(passwordInput, matchWrap());
-        gap(card, 12);
-
-        totpInput = input("两步验证码（需要时填写）", InputType.TYPE_CLASS_NUMBER);
-        totpInput.setVisibility(View.GONE);
-        card.addView(totpInput, matchWrap());
         gap(card, 16);
 
+        card.addView(fieldLabel("密码"));
+        gap(card, 7);
+        LinearLayout passwordShell = roundedBox(SOFT, 15, BORDER, 1);
+        passwordShell.setGravity(Gravity.CENTER_VERTICAL);
+        passwordInput = loginBareInput("请输入密码", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        passwordInput.setImeOptions(EditorInfo.IME_ACTION_DONE);
+        passwordShell.addView(passwordInput, new LinearLayout.LayoutParams(0, dp(54), 1));
+        passwordToggle = text("显示", 12, BLUE, true);
+        passwordToggle.setGravity(Gravity.CENTER);
+        passwordToggle.setPadding(dp(12), dp(10), dp(14), dp(10));
+        passwordToggle.setBackground(rippleRoundRect(Color.TRANSPARENT, 12, 0, RIPPLE));
+        passwordToggle.setOnClickListener(v -> togglePasswordVisibility());
+        passwordShell.addView(passwordToggle, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(50)));
+        card.addView(passwordShell, matchWrap());
+
+        totpInput = input("请输入两步验证码", InputType.TYPE_CLASS_NUMBER);
+        totpInput.setImeOptions(EditorInfo.IME_ACTION_DONE);
+        totpInput.setVisibility(View.GONE);
+        LinearLayout.LayoutParams totpLp = matchWrap();
+        totpLp.topMargin = dp(14);
+        card.addView(totpInput, totpLp);
+
+        usernameInput.setOnEditorActionListener((v, actionId, event) -> {
+            if (actionId == EditorInfo.IME_ACTION_NEXT) {
+                passwordInput.requestFocus();
+                return true;
+            }
+            return false;
+        });
+        passwordInput.setOnEditorActionListener((v, actionId, event) -> {
+            if (actionId == EditorInfo.IME_ACTION_DONE) {
+                login();
+                return true;
+            }
+            return false;
+        });
+        totpInput.setOnEditorActionListener((v, actionId, event) -> {
+            if (actionId == EditorInfo.IME_ACTION_DONE) {
+                login();
+                return true;
+            }
+            return false;
+        });
+
+        gap(card, 20);
         loginButton = primaryButton("登录");
         loginButton.setOnClickListener(v -> login());
         card.addView(loginButton, matchWrap());
 
         loginBusy = new ProgressBar(this);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) loginBusy.setIndeterminateTintList(ColorStateList.valueOf(BLUE));
         loginBusy.setVisibility(View.GONE);
-        LinearLayout.LayoutParams busyLp = new LinearLayout.LayoutParams(dp(30), dp(30));
+        LinearLayout.LayoutParams busyLp = new LinearLayout.LayoutParams(dp(26), dp(26));
         busyLp.gravity = Gravity.CENTER_HORIZONTAL;
-        busyLp.topMargin = dp(14);
+        busyLp.topMargin = dp(12);
         card.addView(loginBusy, busyLp);
 
-        LinearLayout security = roundedBox(BLUE_SOFT, 14, 0, 0);
+        LinearLayout security = roundedBox(BLUE_SOFT, 16, 0, 0);
         security.setPadding(dp(14), dp(12), dp(14), dp(12));
-        security.addView(text("建议使用 HTTPS。登录令牌会使用 Android Keystore 加密后保存在本机。", 12, MUTED, false));
+        LinearLayout securityRow = horizontalRow();
+        securityRow.setGravity(Gravity.CENTER_VERTICAL);
+        boolean secureTransport = baseUrl.startsWith("https://");
+        View dot = new View(this);
+        dot.setBackground(roundRect(secureTransport ? GREEN : AMBER, dp(99), 0, 0));
+        securityRow.addView(dot, new LinearLayout.LayoutParams(dp(8), dp(8)));
+        gapH(securityRow, 9);
+        String securityText = secureTransport
+                ? "HTTPS 安全连接 · 登录令牌由 Android Keystore 加密保存"
+                : "HTTP 测试连接 · 仅建议临时调试使用";
+        securityRow.addView(text(securityText, 11, MUTED, false),
+                new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        security.addView(securityRow, matchWrap());
         LinearLayout.LayoutParams secLp = matchWrap();
         secLp.topMargin = dp(14);
         page.addView(security, secLp);
+
+        TextView footer = text("XNAT Android v1.1.0", 10, MUTED, false);
+        footer.setGravity(Gravity.CENTER_HORIZONTAL);
+        footer.setAlpha(0.72f);
+        LinearLayout.LayoutParams footerLp = matchWrap();
+        footerLp.topMargin = dp(16);
+        page.addView(footer, footerLp);
     }
 
     private void login() {
-        String url = ApiClient.normalizeBase(urlInput.getText().toString());
+        String url = ApiClient.normalizeBase(baseUrl);
         String username = usernameInput.getText().toString().trim();
         String password = passwordInput.getText().toString();
         String totp = totpInput.getText().toString().trim();
 
         if (!ApiClient.isValidBaseUrl(url)) {
-            toast("请输入有效的 Panel 地址，例如 https://panel.example.com");
+            toast("客户端连接地址无效，请打开高级连接设置");
             return;
         }
         if (username.isEmpty() || password.isEmpty()) {
@@ -247,7 +341,7 @@ public class MainActivity extends Activity {
         if (url.startsWith("http://") && !insecureHttpAcknowledged) {
             new AlertDialog.Builder(this)
                     .setTitle("连接不安全")
-                    .setMessage("当前 Panel 使用 HTTP，用户名、密码和令牌在传输过程中可能被窃听。仅建议临时测试使用，正式环境请配置 HTTPS。")
+                    .setMessage("当前高级连接设置使用 HTTP，用户名、密码和令牌在传输过程中可能被窃听。仅建议 Debug 测试使用。")
                     .setNegativeButton("取消", null)
                     .setPositiveButton("继续测试", (d, w) -> {
                         insecureHttpAcknowledged = true;
@@ -298,7 +392,8 @@ public class MainActivity extends Activity {
 
     private void setLoginBusy(boolean value) {
         loginButton.setEnabled(!value);
-        loginButton.setAlpha(value ? 0.65f : 1f);
+        loginButton.setText(value ? "登录中…" : "登录");
+        loginButton.setAlpha(value ? 0.78f : 1f);
         loginBusy.setVisibility(value ? View.VISIBLE : View.GONE);
     }
 
@@ -310,26 +405,28 @@ public class MainActivity extends Activity {
         contentHost = new FrameLayout(this);
         shell.addView(contentHost, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
         navBar = buildBottomNav();
-        shell.addView(navBar, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(66)));
+        shell.addView(navBar, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(78)));
         root.addView(shell, match());
         selectTab(tab);
     }
 
     private LinearLayout buildBottomNav() {
         LinearLayout wrap = column();
-        wrap.setBackgroundColor(CARD);
-        View divider = new View(this);
-        divider.setBackgroundColor(BORDER);
-        wrap.addView(divider, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1)));
+        wrap.setBackgroundColor(BG);
+        wrap.setPadding(dp(10), dp(5), dp(10), dp(8));
 
         LinearLayout row = horizontalRow();
+        row.setTag("nav_row");
         row.setGravity(Gravity.CENTER_VERTICAL);
-        row.addView(navItem("首页", TAB_HOME), navWeight());
-        row.addView(navItem("服务", TAB_SERVICES), navWeight());
-        row.addView(navItem("账务", TAB_BILLING), navWeight());
-        row.addView(navItem("支持", TAB_SUPPORT), navWeight());
-        row.addView(navItem("我的", TAB_ME), navWeight());
-        wrap.addView(row, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
+        row.setPadding(dp(4), dp(4), dp(4), dp(4));
+        row.setBackground(roundRect(CARD, dp(22), BORDER, 1));
+        if (!darkModeActive) row.setElevation(dp(2));
+        row.addView(navItem("首页", TAB_HOME), navCellWeight());
+        row.addView(navItem("服务", TAB_SERVICES), navCellWeight());
+        row.addView(navItem("账务", TAB_BILLING), navCellWeight());
+        row.addView(navItem("支持", TAB_SUPPORT), navCellWeight());
+        row.addView(navItem("我的", TAB_ME), navCellWeight());
+        wrap.addView(row, match());
         return wrap;
     }
 
@@ -337,51 +434,49 @@ public class MainActivity extends Activity {
         LinearLayout item = column();
         item.setGravity(Gravity.CENTER);
         item.setTag(tab);
-        item.setPadding(dp(6), dp(8), dp(6), dp(5));
+        item.setPadding(dp(4), dp(5), dp(4), dp(4));
 
-        View indicator = new View(this);
-        indicator.setTag("indicator");
-        item.addView(indicator, new LinearLayout.LayoutParams(dp(24), dp(3)));
-        gap(item, 7);
-        TextView txt = text(label, 12, MUTED, false);
+        NavIconView icon = new NavIconView(tab);
+        icon.setTag("icon");
+        item.addView(icon, new LinearLayout.LayoutParams(dp(23), dp(23)));
+        gap(item, 3);
+        TextView txt = text(label, 10, MUTED, false);
         txt.setTag("label");
         txt.setGravity(Gravity.CENTER);
         item.addView(txt, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        item.setBackground(rippleRoundRect(Color.TRANSPARENT, 15, 0, RIPPLE));
         item.setOnClickListener(v -> { subtleHaptic(v); selectTab(tab); });
         return item;
     }
 
     private void updateBottomNav() {
         if (navBar == null) return;
-        LinearLayout row = (LinearLayout) navBar.getChildAt(1);
+        View found = navBar.findViewWithTag("nav_row");
+        if (!(found instanceof LinearLayout)) return;
+        LinearLayout row = (LinearLayout) found;
         for (int i = 0; i < row.getChildCount(); i++) {
             View child = row.getChildAt(i);
             if (!(child instanceof LinearLayout)) continue;
             LinearLayout item = (LinearLayout) child;
             int tab = (int) item.getTag();
             boolean active = tab == currentTab;
-            View indicator = item.findViewWithTag("indicator");
+            View iconView = item.findViewWithTag("icon");
             TextView label = item.findViewWithTag("label");
-            indicator.setBackground(roundRect(BLUE, dp(99), 0, 0));
-            indicator.animate().cancel();
-            if (active) {
-                indicator.setPivotX(indicator.getWidth() > 0 ? indicator.getWidth() / 2f : dp(12));
-                indicator.setScaleX(0.62f);
-                indicator.setAlpha(0.42f);
-                indicator.animate().alpha(1f).scaleX(1f).setDuration(180L).setInterpolator(motionEnter).start();
-            } else {
-                indicator.animate().alpha(0f).scaleX(0.62f).setDuration(110L).setInterpolator(motionStandard).start();
-            }
+            if (iconView instanceof NavIconView) ((NavIconView) iconView).setActive(active);
             label.animate().cancel();
             label.setTextColor(active ? BLUE : MUTED);
             label.setTypeface(Typeface.DEFAULT, active ? Typeface.BOLD : Typeface.NORMAL);
-            label.setAlpha(active ? 0.90f : 0.82f);
-            label.animate().alpha(1f).setDuration(active ? 150L : 100L).setInterpolator(motionEnter).start();
-            // Never scale the navigation cell itself; only the fixed-size indicator
-            // animates, so the bottom bar geometry cannot jump.
+            label.setAlpha(active ? 1f : 0.78f);
+            item.setBackground(rippleRoundRect(active ? BLUE_SOFT : Color.TRANSPARENT, 15, 0, RIPPLE));
             item.animate().cancel();
             item.setScaleX(1f);
             item.setScaleY(1f);
+            if (active) {
+                item.setAlpha(0.84f);
+                item.animate().alpha(1f).setDuration(160L).setInterpolator(motionEnter).start();
+            } else {
+                item.setAlpha(1f);
+            }
         }
     }
 
@@ -432,7 +527,7 @@ public class MainActivity extends Activity {
         contentHost.removeAllViews();
         contentHost.addView(swipe, frameMatch());
 
-        LinearLayout header = topHeader("XNAT", compactEndpoint(baseUrl), "刷新", () -> {
+        LinearLayout header = topHeader("概览", "XNAT · 服务器管理中心", "刷新", () -> {
             swipe.setRefreshing(true);
             loadHome(gen, swipe, page, false);
         });
@@ -482,9 +577,9 @@ public class MainActivity extends Activity {
             LinearLayout heroTop = horizontalRow();
             heroTop.setGravity(Gravity.CENTER_VERTICAL);
             heroTop.addView(text(greeting() + "，" + user.optString("username", "用户"), 21, Color.WHITE, true), new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
-            heroTop.addView(pill("在线控制", Color.rgb(219, 234, 254), Color.argb(34, 255, 255, 255)));
+            heroTop.addView(pill("安全连接", Color.rgb(219, 234, 254), Color.argb(34, 255, 255, 255)));
             hero.addView(heroTop, matchWrap());
-            TextView heroSub = text("你的 XNAT 服务运行概览", 12, Color.rgb(191, 203, 221), false);
+            TextView heroSub = text("集中查看服务状态、余额与常用操作", 12, Color.rgb(191, 203, 221), false);
             heroSub.setPadding(0, dp(5), 0, dp(18));
             hero.addView(heroSub);
             LinearLayout balanceRow = horizontalRow();
@@ -495,13 +590,13 @@ public class MainActivity extends Activity {
             balance.setPadding(0, dp(2), 0, 0);
             balanceBlock.addView(balance);
             balanceRow.addView(balanceBlock, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
-            balanceRow.addView(text(stats.optInt("server_count", 0) + " 个服务", 12, Color.rgb(219, 234, 254), true));
+            balanceRow.addView(text(stats.optInt("running_count", 0) + " 运行中 / " + stats.optInt("server_count", 0) + " 服务", 12, Color.rgb(219, 234, 254), true));
             hero.addView(balanceRow, matchWrap());
             page.addView(hero, matchWrap());
             gap(page, 14);
 
             LinearLayout row1 = horizontalRow();
-            row1.addView(statCard("服务", stats.optInt("server_count", 0), BLUE), weighted());
+            row1.addView(statCard("全部服务", stats.optInt("server_count", 0), BLUE), weighted());
             gapH(row1, 10);
             row1.addView(statCard("运行中", stats.optInt("running_count", 0), GREEN), weighted());
             page.addView(row1, matchWrap());
@@ -1816,7 +1911,7 @@ public class MainActivity extends Activity {
         swipe.addView(scroll, match());
         contentHost.removeAllViews();
         contentHost.addView(swipe, frameMatch());
-        page.addView(topHeader("我的", "账户与客户端设置", "刷新", () -> {
+        page.addView(topHeader("账户", "个人信息与客户端设置", "刷新", () -> {
             swipe.setRefreshing(true);
             loadMe(gen, swipe, page, false);
         }), matchWrap());
@@ -1857,46 +1952,53 @@ public class MainActivity extends Activity {
             page.removeViews(1, page.getChildCount() - 1);
             gap(page, 18);
 
-            LinearLayout profile = flatAccentCard(SOFT_BLUE, 22);
+            String username = me.optString("username", "用户");
+            LinearLayout profile = column();
+            profile.setBackground(gradientRoundRect(NAVY, NAVY_2, 24));
             profile.setPadding(dp(18), dp(18), dp(18), dp(18));
             LinearLayout row = horizontalRow();
             row.setGravity(Gravity.CENTER_VERTICAL);
+            TextView avatar = text(profileInitial(username), 19, Color.WHITE, true);
+            avatar.setGravity(Gravity.CENTER);
+            avatar.setBackground(roundRect(Color.argb(38, 255, 255, 255), dp(18), 0, 0));
+            row.addView(avatar, new LinearLayout.LayoutParams(dp(52), dp(52)));
+            gapH(row, 13);
             LinearLayout identity = column();
-            identity.addView(text(me.optString("username", "用户"), 24, INK, true));
-            TextView email = text(blankDash(me.optString("email", "")), 13, MUTED, false);
-            email.setPadding(0, dp(4), 0, 0);
+            identity.addView(text(username, 22, Color.WHITE, true));
+            TextView email = text(blankDash(me.optString("email", "")), 12, Color.rgb(196, 210, 230), false);
+            email.setPadding(0, dp(3), 0, 0);
             identity.addView(email);
             row.addView(identity, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
-            row.addView(pill(me.optBoolean("is_admin", false) ? "管理员" : "用户", BLUE, BLUE_SOFT));
+            row.addView(pill(me.optBoolean("is_admin", false) ? "管理员" : "用户", Color.rgb(225, 236, 255), Color.argb(34, 255, 255, 255)));
             profile.addView(row, matchWrap());
             gap(profile, 16);
-            LinearLayout metrics = horizontalRow();
-            metrics.addView(profileMetric("余额", "¥" + money(me.optLong("balance_cents", 0))), weighted());
-            metrics.addView(profileMetric("未读通知", String.valueOf(me.optInt("unread_notifications", 0))), weighted());
-            profile.addView(metrics, matchWrap());
-            page.addView(profile, matchWrap());
-            gap(page, 22);
 
-            page.addView(sectionHeader("账户安全", "当前账户安全状态", ""));
+            LinearLayout metricsBox = roundedBox(Color.argb(24, 255, 255, 255), 16, 0, 0);
+            metricsBox.setPadding(dp(14), dp(12), dp(14), dp(12));
+            LinearLayout metrics = horizontalRow();
+            metrics.addView(miniMetric("账户余额", "¥" + money(me.optLong("balance_cents", 0))), weighted());
+            View split = new View(this);
+            split.setBackgroundColor(Color.argb(40, 255, 255, 255));
+            metrics.addView(split, new LinearLayout.LayoutParams(dp(1), dp(34)));
+            gapH(metrics, 14);
+            metrics.addView(miniMetric("未读通知", String.valueOf(me.optInt("unread_notifications", 0))), weighted());
+            metricsBox.addView(metrics, matchWrap());
+            profile.addView(metricsBox, matchWrap());
+            page.addView(profile, matchWrap());
+            gap(page, 24);
+
+            page.addView(sectionHeader("安全与连接", "账户登录与客户端安全状态", ""));
             gap(page, 10);
             LinearLayout security = surfaceCard(18);
             security.setPadding(dp(16), dp(6), dp(16), dp(6));
             security.addView(infoRow("两步验证", me.optBoolean("totp_enabled", false) ? "已启用" : "未启用"));
             security.addView(thinDivider());
             security.addView(infoRow("账户类型", me.optBoolean("is_admin", false) ? "管理员" : "普通用户"));
+            security.addView(thinDivider());
+            security.addView(infoRow("传输安全", baseUrl.startsWith("https://") ? "HTTPS" : "HTTP（测试）"));
+            security.addView(thinDivider());
+            security.addView(infoRow("凭据存储", "Android Keystore"));
             page.addView(security, matchWrap());
-            gap(page, 22);
-
-            page.addView(sectionHeader("连接", "当前 Android 客户端连接信息", ""));
-            gap(page, 10);
-            LinearLayout connection = surfaceCard(18);
-            connection.setPadding(dp(16), dp(6), dp(16), dp(6));
-            connection.addView(infoRow("Panel", compactEndpoint(baseUrl)));
-            connection.addView(thinDivider());
-            connection.addView(infoRow("传输安全", baseUrl.startsWith("https://") ? "HTTPS" : "HTTP（测试）"));
-            connection.addView(thinDivider());
-            connection.addView(infoRow("Mobile API", "v1"));
-            page.addView(connection, matchWrap());
             gap(page, 22);
 
             page.addView(sectionHeader("外观", "选择 XNAT 的显示模式", ""));
@@ -1915,14 +2017,22 @@ public class MainActivity extends Activity {
             about.setPadding(dp(16), dp(6), dp(16), dp(6));
             about.addView(infoRow("应用", "XNAT Android"));
             about.addView(thinDivider());
-            about.addView(infoRow("版本", "1.0.0"));
+            LinearLayout versionRow = infoRow("版本", "1.1.0");
+            versionRow.setOnLongClickListener(v -> {
+                subtleHaptic(v);
+                showAdvancedServerSettings();
+                return true;
+            });
+            about.addView(versionRow);
+            about.addView(thinDivider());
+            about.addView(infoRow("Mobile API", "v1"));
             page.addView(about, matchWrap());
             gap(page, 20);
 
             Button logout = sheetButton("退出登录", RED, RED_SOFT, 0);
             logout.setOnClickListener(v -> confirmLogoutSheet());
             page.addView(logout, matchWrap());
-        
+
         } finally {
             endStableRender(page, keepScrollY);
         }
@@ -2817,8 +2927,7 @@ public class MainActivity extends Activity {
     }
 
     private LinearLayout surfaceCard(int radius) {
-        // Flat surface: separation comes from spacing and background tone.
-        return roundedBox(CARD, radius, 0, 0);
+        return roundedBox(CARD, radius, BORDER, 1);
     }
 
     private LinearLayout flatAccentCard(int color, int radius) {
@@ -2971,6 +3080,104 @@ public class MainActivity extends Activity {
         LinearLayout v = new LinearLayout(this);
         v.setOrientation(LinearLayout.HORIZONTAL);
         return v;
+    }
+
+    private TextView fieldLabel(String value) {
+        TextView label = text(value, 12, INK, true);
+        label.setAlpha(0.90f);
+        return label;
+    }
+
+    private EditText loginBareInput(String hint, int inputType) {
+        EditText e = new EditText(this);
+        e.setHint(hint);
+        e.setTextSize(14);
+        e.setTextColor(INK);
+        e.setHintTextColor(MUTED);
+        e.setSingleLine(true);
+        e.setInputType(inputType);
+        e.setPadding(dp(14), 0, dp(6), 0);
+        e.setMinHeight(dp(54));
+        e.setBackgroundColor(Color.TRANSPARENT);
+        return e;
+    }
+
+    private void togglePasswordVisibility() {
+        if (passwordInput == null) return;
+        int cursor = Math.max(0, passwordInput.getSelectionStart());
+        passwordVisible = !passwordVisible;
+        passwordInput.setInputType(InputType.TYPE_CLASS_TEXT |
+                (passwordVisible ? InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD : InputType.TYPE_TEXT_VARIATION_PASSWORD));
+        passwordInput.setSelection(Math.min(cursor, passwordInput.length()));
+        if (passwordToggle != null) passwordToggle.setText(passwordVisible ? "隐藏" : "显示");
+    }
+
+    private boolean isDebugBuild() {
+        return (getApplicationInfo().flags & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0;
+    }
+
+    private void showAdvancedServerSettings() {
+        Dialog dialog = bottomDialog();
+        LinearLayout sheet = bottomSheetBase();
+        sheet.addView(text("高级连接设置", 21, INK, true));
+        TextView desc = text("仅用于维护或测试。普通登录无需配置服务器地址。", 12, MUTED, false);
+        desc.setPadding(0, dp(5), 0, dp(16));
+        sheet.addView(desc);
+
+        EditText serverInput = input("https://panel.example.com", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
+        serverInput.setText(baseUrl.isEmpty() ? DEFAULT_BASE_URL : baseUrl);
+        serverInput.setSelectAllOnFocus(false);
+        serverInput.setSelection(serverInput.length());
+        sheet.addView(serverInput, matchWrap());
+        gap(sheet, 10);
+
+        Button restore = outlineButton("恢复内置地址", BLUE, BLUE_SOFT);
+        restore.setOnClickListener(v -> {
+            serverInput.setText(DEFAULT_BASE_URL);
+            serverInput.setSelection(serverInput.length());
+        });
+        sheet.addView(restore, matchWrap());
+        gap(sheet, 10);
+
+        LinearLayout actions = horizontalRow();
+        Button cancel = sheetButton("取消", INK, SOFT, BORDER);
+        Button save = sheetButton("保存", Color.WHITE, BLUE, 0);
+        actions.addView(cancel, weighted());
+        gapH(actions, 10);
+        actions.addView(save, weighted());
+        sheet.addView(actions, matchWrap());
+        cancel.setOnClickListener(v -> dialog.dismiss());
+        save.setOnClickListener(v -> {
+            String value = ApiClient.normalizeBase(serverInput.getText().toString());
+            if (!ApiClient.isValidBaseUrl(value)) {
+                toast("请输入有效的服务器地址");
+                return;
+            }
+            if (!isDebugBuild() && !value.startsWith("https://")) {
+                toast("正式版仅支持 HTTPS");
+                return;
+            }
+            boolean changed = !value.equals(baseUrl);
+            baseUrl = value;
+            insecureHttpAcknowledged = false;
+            prefs.edit().putString("base_url", baseUrl).apply();
+            dialog.dismiss();
+            if (changed) {
+                boolean wasLoggedIn = !token.isEmpty();
+                if (wasLoggedIn) clearLogin();
+                showLogin();
+                toast(wasLoggedIn ? "连接地址已更新，请重新登录" : "连接地址已更新");
+            } else {
+                toast("连接地址已保存");
+            }
+        });
+        showBottomDialog(dialog, sheet);
+    }
+
+    private String profileInitial(String value) {
+        if (value == null || value.trim().isEmpty()) return "X";
+        String trimmed = value.trim();
+        return trimmed.substring(0, Math.min(1, trimmed.length())).toUpperCase();
     }
 
     private EditText input(String hint, int inputType) {
@@ -3469,6 +3676,66 @@ public class MainActivity extends Activity {
         }
     }
 
+    private final class NavIconView extends View {
+        private final int type;
+        private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private boolean active;
+
+        NavIconView(int type) {
+            super(MainActivity.this);
+            this.type = type;
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setStrokeCap(Paint.Cap.ROUND);
+            paint.setStrokeJoin(Paint.Join.ROUND);
+        }
+
+        void setActive(boolean value) {
+            if (active == value) return;
+            active = value;
+            invalidate();
+        }
+
+        @Override
+        protected void onDraw(Canvas canvas) {
+            super.onDraw(canvas);
+            float w = getWidth();
+            float h = getHeight();
+            float cx = w / 2f;
+            float cy = h / 2f;
+            float sw = dp(active ? 2 : 1.7f);
+            paint.setStrokeWidth(sw);
+            paint.setColor(active ? BLUE : MUTED);
+            paint.setStyle(Paint.Style.STROKE);
+
+            if (type == TAB_HOME) {
+                canvas.drawLine(cx - dp(7), cy, cx, cy - dp(6), paint);
+                canvas.drawLine(cx, cy - dp(6), cx + dp(7), cy, paint);
+                canvas.drawRoundRect(new RectF(cx - dp(5.5f), cy - dp(1), cx + dp(5.5f), cy + dp(7)), dp(2), dp(2), paint);
+            } else if (type == TAB_SERVICES) {
+                canvas.drawRoundRect(new RectF(cx - dp(7), cy - dp(7), cx + dp(7), cy - dp(1)), dp(2), dp(2), paint);
+                canvas.drawRoundRect(new RectF(cx - dp(7), cy + dp(1.5f), cx + dp(7), cy + dp(7.5f)), dp(2), dp(2), paint);
+                canvas.drawCircle(cx + dp(4.5f), cy - dp(4), dp(0.9f), paint);
+                canvas.drawCircle(cx + dp(4.5f), cy + dp(4.5f), dp(0.9f), paint);
+            } else if (type == TAB_BILLING) {
+                canvas.drawRoundRect(new RectF(cx - dp(7.5f), cy - dp(5.5f), cx + dp(7.5f), cy + dp(6.5f)), dp(2.5f), dp(2.5f), paint);
+                canvas.drawLine(cx - dp(5), cy - dp(7.5f), cx + dp(4), cy - dp(7.5f), paint);
+                canvas.drawCircle(cx + dp(4.5f), cy + dp(0.5f), dp(1), paint);
+            } else if (type == TAB_SUPPORT) {
+                canvas.drawRoundRect(new RectF(cx - dp(7.5f), cy - dp(6.5f), cx + dp(7.5f), cy + dp(4.5f)), dp(3), dp(3), paint);
+                canvas.drawLine(cx - dp(2), cy + dp(4.5f), cx - dp(5), cy + dp(7.5f), paint);
+                canvas.drawLine(cx - dp(3.5f), cy - dp(2), cx + dp(3.5f), cy - dp(2), paint);
+                canvas.drawLine(cx - dp(3.5f), cy + dp(1), cx + dp(1.5f), cy + dp(1), paint);
+            } else {
+                canvas.drawCircle(cx, cy - dp(4.5f), dp(3.5f), paint);
+                canvas.drawArc(new RectF(cx - dp(7), cy + dp(0.5f), cx + dp(7), cy + dp(10)), 200, 140, false, paint);
+            }
+        }
+    }
+
+    private float dp(float value) {
+        return value * getResources().getDisplayMetrics().density;
+    }
+
     @Override
     public void onBackPressed() {
         if (inDetail) {
@@ -3510,6 +3777,12 @@ public class MainActivity extends Activity {
 
     private LinearLayout.LayoutParams navWeight() {
         return new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1);
+    }
+
+    private LinearLayout.LayoutParams navCellWeight() {
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1);
+        lp.setMargins(dp(2), 0, dp(2), 0);
+        return lp;
     }
 
     private void gap(LinearLayout parent, int value) {
