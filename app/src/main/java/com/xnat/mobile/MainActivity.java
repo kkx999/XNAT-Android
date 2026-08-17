@@ -3890,7 +3890,7 @@ public class MainActivity extends Activity {
     private LinearLayout.LayoutParams navCellWeight() {
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1);
         // More breathing room keeps the active capsule from filling an entire fifth
-        // of the navigation rail and removes the chunky look from the first RC.
+        // of the navigation rail and keeps the navigation rail visually light and compact.
         lp.setMargins(dp(5), dp(4), dp(5), dp(4));
         return lp;
     }

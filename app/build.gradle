@@ -20,7 +20,7 @@ android {
         applicationId 'com.xnat.mobile'
         minSdk 26
         targetSdk 36
-        versionCode 10102
+        versionCode 10103
         versionName '1.1.0'
         manifestPlaceholders = [usesCleartextTraffic: 'false']
     }
