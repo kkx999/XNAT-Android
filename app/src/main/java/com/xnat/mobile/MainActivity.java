@@ -131,6 +131,14 @@ public class MainActivity extends Activity {
     private static final long UPDATE_CHECK_INTERVAL_MS = 12L * 60L * 60L * 1000L;
     private final Map<Integer, JSONObject> cachedServerDetails = new HashMap<>();
     private final Map<Integer, JSONObject> cachedTicketDetails = new HashMap<>();
+    // Recharge dialogs keep one polling task and one local countdown task.
+    // Replacing the whole payment sheet every few seconds caused visible horizontal jitter,
+    // so pending orders now update the timer in place and only rebuild when state changes.
+    private final Map<Dialog, Runnable> rechargePollTasks = new HashMap<>();
+    private final Map<Dialog, Runnable> rechargeCountdownTasks = new HashMap<>();
+    private static final String TAG_RECHARGE_REMAINING = "xnat_recharge_remaining";
+    private static final String TAG_RECHARGE_STATUS = "xnat_recharge_status";
+    private static final String TAG_RECHARGE_ORDER_PREFIX = "xnat_recharge_order:";
 
     private static final int TAB_HOME = 0;
     private static final int TAB_SERVICES = 1;
@@ -1323,10 +1331,7 @@ public class MainActivity extends Activity {
         } else {
             Button recharge = sheetButton("去充值", Color.WHITE, BLUE, 0);
             buttons.addView(recharge, weighted());
-            recharge.setOnClickListener(v -> {
-                dialog.dismiss();
-                showRechargeStartSheet();
-            });
+            recharge.setOnClickListener(v -> showRechargeStartSheet(dialog));
         }
         sheet.addView(buttons, matchWrap());
         cancel.setOnClickListener(v -> {
@@ -2993,7 +2998,12 @@ public class MainActivity extends Activity {
     }
 
     private void showRechargeStartSheet() {
-        Dialog dialog = bottomDialog();
+        showRechargeStartSheet(null);
+    }
+
+    private void showRechargeStartSheet(Dialog existingDialog) {
+        Dialog dialog = existingDialog != null ? existingDialog : bottomDialog();
+        prepareRechargeDialog(dialog);
         LinearLayout loading = bottomSheetBase();
         loading.addView(text("USDT 充值", 22, INK, true));
         TextView desc = text("正在读取充值通道…", 12, MUTED, false);
@@ -3004,7 +3014,8 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(30), dp(30));
         lp.gravity = Gravity.CENTER_HORIZONTAL;
         loading.addView(busy, lp);
-        showBottomDialog(dialog, loading);
+        if (dialog.isShowing()) swapBottomDialogContent(dialog, loading, true);
+        else showBottomDialog(dialog, loading);
         io.execute(() -> {
             try {
                 JSONObject cfg = ApiClient.request(baseUrl, "/api/v1/recharge/config", "GET", token, null);
@@ -3122,9 +3133,16 @@ public class MainActivity extends Activity {
                 if (recharge == null) throw new Exception("服务器未返回充值订单");
                 main.post(() -> {
                     managementActionInProgress = false;
-                    dialog.dismiss();
                     cachedBilling = null;
-                    showRechargeOrderSheet(recharge);
+                    if (!dialog.isShowing()) {
+                        showRechargeOrderSheet(recharge);
+                        return;
+                    }
+                    LinearLayout orderSheet = rechargeOrderContent(dialog, recharge);
+                    swapBottomDialogContent(dialog, orderSheet, true, () -> {
+                        startRechargeCountdown(dialog, recharge.optInt("remaining_seconds", 0));
+                        scheduleRechargePoll(dialog, recharge.optInt("id", 0), recharge.optString("status", ""));
+                    });
                 });
             } catch (Exception e) {
                 main.post(() -> {
@@ -3151,17 +3169,22 @@ public class MainActivity extends Activity {
 
     private void showRechargeOrderSheet(JSONObject recharge) {
         Dialog dialog = bottomDialog();
+        prepareRechargeDialog(dialog);
         showBottomDialog(dialog, rechargeOrderContent(dialog, recharge));
+        startRechargeCountdown(dialog, recharge.optInt("remaining_seconds", 0));
         scheduleRechargePoll(dialog, recharge.optInt("id", 0), recharge.optString("status", ""));
     }
 
     private LinearLayout rechargeOrderContent(Dialog dialog, JSONObject r) {
         LinearLayout sheet = bottomSheetBase();
         String status = r.optString("status", "pending");
+        sheet.setTag(TAG_RECHARGE_ORDER_PREFIX + rechargeOrderSignature(r));
         LinearLayout heading = horizontalRow();
         heading.setGravity(Gravity.CENTER_VERTICAL);
         heading.addView(text("USDT 充值订单", 22, INK, true), new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
-        heading.addView(pill(r.optString("status_label", rechargeStatusLabel(status)), rechargeStatusColor(status), rechargeStatusBg(status)));
+        TextView statusBadge = pill(r.optString("status_label", rechargeStatusLabel(status)), rechargeStatusColor(status), rechargeStatusBg(status));
+        statusBadge.setTag(TAG_RECHARGE_STATUS);
+        heading.addView(statusBadge);
         sheet.addView(heading, matchWrap());
         TextView idText = text("订单 #" + r.optInt("id", 0) + " · " + r.optString("chain_label", r.optString("chain", "").toUpperCase()), 11, MUTED, false);
         idText.setPadding(0, dp(5), 0, dp(14));
@@ -3176,7 +3199,14 @@ public class MainActivity extends Activity {
         amountBox.addView(infoRow("锁定汇率", "1 USDT ≈ ¥" + r.optString("rate_text", "-")));
         if (r.optInt("remaining_seconds", 0) > 0) {
             amountBox.addView(thinDivider());
-            amountBox.addView(infoRow("剩余时间", formatRemaining(r.optInt("remaining_seconds", 0))));
+            LinearLayout remainingRow = infoRow("剩余时间", formatRemaining(r.optInt("remaining_seconds", 0)));
+            if (remainingRow.getChildCount() > 1 && remainingRow.getChildAt(1) instanceof TextView) {
+                TextView remainingValue = (TextView) remainingRow.getChildAt(1);
+                remainingValue.setTag(TAG_RECHARGE_REMAINING);
+                remainingValue.setMinWidth(dp(64));
+                remainingValue.setGravity(Gravity.RIGHT);
+            }
+            amountBox.addView(remainingRow);
         }
         sheet.addView(amountBox, matchWrap());
 
@@ -3241,11 +3271,91 @@ public class MainActivity extends Activity {
         return sheet;
     }
 
+    private void prepareRechargeDialog(Dialog dialog) {
+        if (dialog == null) return;
+        dialog.setOnDismissListener(ignored -> clearRechargeTasks(dialog));
+    }
+
+    private void clearRechargeTasks(Dialog dialog) {
+        Runnable poll = rechargePollTasks.remove(dialog);
+        if (poll != null) main.removeCallbacks(poll);
+        Runnable countdown = rechargeCountdownTasks.remove(dialog);
+        if (countdown != null) main.removeCallbacks(countdown);
+    }
+
+    private boolean rechargePollingStatus(String status) {
+        return "pending".equals(status) || "manual".equals(status) || "detected".equals(status);
+    }
+
+    private String rechargeOrderSignature(JSONObject r) {
+        return r.optString("status", "") + "|"
+                + r.optBoolean("needs_txid", false) + "|"
+                + r.optBoolean("can_cancel", false) + "|"
+                + r.optString("deposit_address", "") + "|"
+                + r.optString("tx_hash", "");
+    }
+
+    private View currentBottomSheet(Dialog dialog) {
+        if (dialog == null || !dialog.isShowing() || dialog.getWindow() == null) return null;
+        View content = dialog.getWindow().findViewById(android.R.id.content);
+        if (!(content instanceof ViewGroup) || ((ViewGroup) content).getChildCount() == 0) return null;
+        return ((ViewGroup) content).getChildAt(0);
+    }
+
+    private void startRechargeCountdown(Dialog dialog, int remainingSeconds) {
+        Runnable old = rechargeCountdownTasks.remove(dialog);
+        if (old != null) main.removeCallbacks(old);
+        if (dialog == null || remainingSeconds <= 0) return;
+        final long endAt = System.currentTimeMillis() + (remainingSeconds * 1000L);
+        Runnable task = new Runnable() {
+            @Override public void run() {
+                if (!dialog.isShowing()) {
+                    rechargeCountdownTasks.remove(dialog);
+                    return;
+                }
+                View sheet = currentBottomSheet(dialog);
+                TextView value = sheet == null ? null : sheet.findViewWithTag(TAG_RECHARGE_REMAINING);
+                if (value == null) {
+                    rechargeCountdownTasks.remove(dialog);
+                    return;
+                }
+                long leftMs = Math.max(0L, endAt - System.currentTimeMillis());
+                int leftSeconds = (int) Math.ceil(leftMs / 1000.0);
+                value.setText(formatRemaining(leftSeconds));
+                if (leftSeconds > 0) main.postDelayed(this, 1000L);
+                else rechargeCountdownTasks.remove(dialog);
+            }
+        };
+        rechargeCountdownTasks.put(dialog, task);
+        main.post(task);
+    }
+
+    private boolean updateRechargeOrderInPlace(Dialog dialog, JSONObject fresh) {
+        View sheet = currentBottomSheet(dialog);
+        if (sheet == null) return false;
+        String expectedTag = TAG_RECHARGE_ORDER_PREFIX + rechargeOrderSignature(fresh);
+        if (!expectedTag.equals(String.valueOf(sheet.getTag()))) return false;
+        TextView statusBadge = sheet.findViewWithTag(TAG_RECHARGE_STATUS);
+        String status = fresh.optString("status", "pending");
+        if (statusBadge != null) {
+            statusBadge.setText(fresh.optString("status_label", rechargeStatusLabel(status)));
+            statusBadge.setTextColor(rechargeStatusColor(status));
+            statusBadge.setBackground(roundRect(rechargeStatusBg(status), dp(999), 0, 0));
+        }
+        startRechargeCountdown(dialog, fresh.optInt("remaining_seconds", 0));
+        return true;
+    }
+
     private void scheduleRechargePoll(Dialog dialog, int rechargeId, String status) {
-        if (rechargeId <= 0 || !("pending".equals(status) || "manual".equals(status) || "detected".equals(status))) return;
-        main.postDelayed(() -> {
+        Runnable previous = rechargePollTasks.remove(dialog);
+        if (previous != null) main.removeCallbacks(previous);
+        if (rechargeId <= 0 || !rechargePollingStatus(status) || dialog == null || !dialog.isShowing()) return;
+        Runnable task = () -> {
+            rechargePollTasks.remove(dialog);
             if (dialog.isShowing()) refreshRechargeDialog(dialog, rechargeId, false);
-        }, 5000L);
+        };
+        rechargePollTasks.put(dialog, task);
+        main.postDelayed(task, 5000L);
     }
 
     private void refreshRechargeDialog(Dialog dialog, int rechargeId, boolean userInitiated) {
@@ -3254,15 +3364,22 @@ public class MainActivity extends Activity {
                 JSONObject fresh = ApiClient.request(baseUrl, "/api/v1/recharges/" + rechargeId, "GET", token, null);
                 main.post(() -> {
                     if (!dialog.isShowing()) return;
-                    swapBottomDialogContent(dialog, rechargeOrderContent(dialog, fresh), false);
-                    if ("paid".equals(fresh.optString("status")) || "completed".equals(fresh.optString("status"))) {
+                    String freshStatus = fresh.optString("status", "");
+                    boolean updatedInPlace = updateRechargeOrderInPlace(dialog, fresh);
+                    Runnable afterInstall = () -> startRechargeCountdown(dialog, fresh.optInt("remaining_seconds", 0));
+                    if (!updatedInPlace) {
+                        swapBottomDialogContent(dialog, rechargeOrderContent(dialog, fresh), false, afterInstall);
+                    }
+                    if ("paid".equals(freshStatus) || "completed".equals(freshStatus)) {
                         cachedBilling = null;
                         cachedMe = null;
                         cachedHome = null;
+                        Runnable poll = rechargePollTasks.remove(dialog);
+                        if (poll != null) main.removeCallbacks(poll);
                         if (userInitiated) toast("充值已到账");
                     } else {
                         if (userInitiated) toast("状态已刷新");
-                        scheduleRechargePoll(dialog, rechargeId, fresh.optString("status", ""));
+                        scheduleRechargePoll(dialog, rechargeId, freshStatus);
                     }
                 });
             } catch (Exception e) {
@@ -3279,7 +3396,12 @@ public class MainActivity extends Activity {
                 main.post(() -> {
                     cachedBilling = null;
                     if (!dialog.isShowing()) return;
-                    if (fresh != null) swapBottomDialogContent(dialog, rechargeOrderContent(dialog, fresh), true);
+                    if (fresh != null) {
+                        swapBottomDialogContent(dialog, rechargeOrderContent(dialog, fresh), true, () -> {
+                            startRechargeCountdown(dialog, fresh.optInt("remaining_seconds", 0));
+                            scheduleRechargePoll(dialog, rechargeId, fresh.optString("status", ""));
+                        });
+                    }
                     toast(out.optString("message", "订单已取消"));
                 });
             } catch (Exception e) {
@@ -3296,7 +3418,12 @@ public class MainActivity extends Activity {
                 JSONObject fresh = out.optJSONObject("recharge");
                 main.post(() -> {
                     cachedBilling = null;
-                    if (dialog.isShowing() && fresh != null) swapBottomDialogContent(dialog, rechargeOrderContent(dialog, fresh), true);
+                    if (dialog.isShowing() && fresh != null) {
+                        swapBottomDialogContent(dialog, rechargeOrderContent(dialog, fresh), true, () -> {
+                            startRechargeCountdown(dialog, fresh.optInt("remaining_seconds", 0));
+                            scheduleRechargePoll(dialog, rechargeId, fresh.optString("status", ""));
+                        });
+                    }
                     toast("交易哈希已提交");
                 });
             } catch (Exception e) {
@@ -3997,8 +4124,14 @@ public class MainActivity extends Activity {
     }
 
     private void swapBottomDialogContent(Dialog dialog, LinearLayout nextSheet, boolean forward) {
+        swapBottomDialogContent(dialog, nextSheet, forward, null);
+    }
+
+    private void swapBottomDialogContent(Dialog dialog, LinearLayout nextSheet, boolean forward, Runnable afterInstall) {
         if (dialog == null || !dialog.isShowing()) {
-            showBottomDialog(dialog == null ? bottomDialog() : dialog, nextSheet);
+            Dialog target = dialog == null ? bottomDialog() : dialog;
+            showBottomDialog(target, nextSheet);
+            if (afterInstall != null) afterInstall.run();
             return;
         }
         Window window = dialog.getWindow();
@@ -4013,14 +4146,15 @@ public class MainActivity extends Activity {
         Runnable install = () -> {
             dialog.setContentView(nextSheet);
             configureBottomDialogWindow(dialog);
-            nextSheet.setAlpha(0.94f);
-            nextSheet.setTranslationX(dp(forward ? 10 : -10));
+            nextSheet.setAlpha(0.96f);
+            nextSheet.setTranslationY(dp(forward ? 8 : 4));
             nextSheet.animate()
                     .alpha(1f)
-                    .translationX(0f)
-                    .setDuration(180L)
+                    .translationY(0f)
+                    .setDuration(210L)
                     .setInterpolator(motionEnter)
                     .start();
+            if (afterInstall != null) afterInstall.run();
         };
         if (outgoing == null) {
             install.run();
@@ -4028,9 +4162,9 @@ public class MainActivity extends Activity {
         }
         outgoing.animate().cancel();
         outgoing.animate()
-                .alpha(0.90f)
-                .translationX(dp(forward ? -8 : 8))
-                .setDuration(90L)
+                .alpha(0.96f)
+                .translationY(dp(forward ? -3 : 3))
+                .setDuration(100L)
                 .setInterpolator(motionStandard)
                 .withEndAction(install)
                 .start();

@@ -1,9 +1,12 @@
-# XNAT Android v1.2.0-dev3
+# XNAT Android v1.2.0-dev4
 
-XNAT 官方原生 Android 客户端。v1.2.0-dev3 基于 v1.1.0 正式版做最小增量升级，对接 XNAT Panel v1.4.2 / Mobile API v1。
+XNAT 官方原生 Android 客户端。v1.2.0-dev4 基于 v1.1.0 正式版做最小增量升级，对接 XNAT Panel v1.4.2 / Mobile API v1。
 
-## v1.2.0-dev3
+## v1.2.0-dev4
 
+- 优化充值 Bottom Sheet 动效：创建订单后不再关闭旧弹层再重新打开，改为同一弹层内平滑切换，整体过渡由左右位移改为低幅度上浮 + 淡入，减少割裂感。
+- 修复充值倒计时导致信息框周期性左右抖动：倒计时改为每秒原地更新单个文本，5 秒状态轮询不再重复重建整张订单页面；只有支付状态或可操作项真正变化时才刷新结构。
+- 充值轮询与倒计时任务增加单实例清理，避免手动刷新、自动轮询或关闭弹层后产生重复任务。
 - 修复 Android 15/16 edge-to-edge 启动页底部黑色系统导航条：启动遮罩改为 Activity 内全屏覆盖层，状态栏/导航栏统一透明并由 XNAT 背景延伸绘制。
 - Bottom Sheet 同步适配 edge-to-edge 与导航栏 Insets，避免充值、更新、删除/重置确认等底部弹层出现同类黑边或遮挡。
 - 深浅主题切换时系统栏保持透明，由页面背景自然过渡，避免状态栏/导航栏闪色。
@@ -32,8 +35,8 @@ XNAT 官方原生 Android 客户端。v1.2.0-dev3 基于 v1.1.0 正式版做最�
 - Host Agent：v1.1.1
 - Agent API：v1
 - Application ID：`com.xnat.mobile`
-- Version Name：`1.2.0-dev3`
-- Version Code：`10203`
+- Version Name：`1.2.0-dev4`
+- Version Code：`10204`
 - Min SDK：26
 - Target / Compile SDK：36
 
@@ -59,9 +62,9 @@ GitHub Actions 构建时会自动使用当前 `GITHUB_REPOSITORY` 作为更新�
 
 构建产物：
 
-- Artifact：`XNAT-Android-v1.2.0-dev3`
-- APK：`XNAT-Android-v1.2.0-dev3.apk`
-- SHA-256：`XNAT-Android-v1.2.0-dev3.apk.sha256`
+- Artifact：`XNAT-Android-v1.2.0-dev4`
+- APK：`XNAT-Android-v1.2.0-dev4.apk`
+- SHA-256：`XNAT-Android-v1.2.0-dev4.apk.sha256`
 
 继续使用 v1.1.0 相同正式签名证书时，可直接覆盖升级并保留登录、主题和本地设置。
 
