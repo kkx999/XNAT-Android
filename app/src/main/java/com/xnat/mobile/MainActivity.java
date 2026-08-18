@@ -127,6 +127,7 @@ public class MainActivity extends Activity {
     private String pendingInstallPath = "";
     private View transientNoticeView = null;
     private Runnable transientNoticeDismiss = null;
+    private int systemBottomInset = 0;
     private static final long UPDATE_CHECK_INTERVAL_MS = 12L * 60L * 60L * 1000L;
     private final Map<Integer, JSONObject> cachedServerDetails = new HashMap<>();
     private final Map<Integer, JSONObject> cachedTicketDetails = new HashMap<>();
@@ -3342,11 +3343,32 @@ public class MainActivity extends Activity {
     }
 
     private void showStartupOverlay() {
-        Dialog dialog = new Dialog(this);
-        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        View content = findViewById(android.R.id.content);
+        if (!(content instanceof FrameLayout)) return;
+        FrameLayout host = (FrameLayout) content;
+
+        // Use an in-activity overlay instead of a separate Dialog window. On modern
+        // Android this keeps one edge-to-edge surface from status bar to gesture bar,
+        // eliminating the detached black navigation strip seen during startup.
+        FrameLayout overlay = new FrameLayout(this);
+        overlay.setBackgroundColor(BG);
+        overlay.setClickable(true);
+        overlay.setFocusable(true);
+        overlay.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
+        overlay.setOnApplyWindowInsetsListener((view, insets) -> {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                android.graphics.Insets bars = insets.getInsets(
+                        WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
+                view.setPadding(bars.left, bars.top, bars.right, bars.bottom);
+            } else {
+                view.setPadding(insets.getSystemWindowInsetLeft(), insets.getSystemWindowInsetTop(),
+                        insets.getSystemWindowInsetRight(), insets.getSystemWindowInsetBottom());
+            }
+            return insets;
+        });
+
         LinearLayout wrap = column();
         wrap.setGravity(Gravity.CENTER);
-        wrap.setBackgroundColor(BG);
         TextView mark = text("X", 30, Color.WHITE, true);
         mark.setGravity(Gravity.CENTER);
         mark.setBackground(gradientRoundRect(NAVY, NAVY_2, 22));
@@ -3361,21 +3383,20 @@ public class MainActivity extends Activity {
         wrap.addView(sub, matchWrap());
         CapsuleProgressView line = new CapsuleProgressView(this);
         line.setColors(BORDER, BLUE);
-        line.setProgressFraction(0.72f);
+        line.setProgressFraction(0.12f);
         LinearLayout.LayoutParams llp = new LinearLayout.LayoutParams(dp(116), dp(4));
         llp.gravity = Gravity.CENTER_HORIZONTAL;
         llp.topMargin = dp(18);
         wrap.addView(line, llp);
-        dialog.setContentView(wrap);
-        Window w = dialog.getWindow();
-        if (w != null) {
-            w.setBackgroundDrawable(new ColorDrawable(BG));
-            w.setLayout(WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT);
-            w.setDimAmount(0f);
-        }
-        dialog.setCancelable(false);
-        dialog.show();
-        if (w != null) w.setLayout(WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT);
+
+        FrameLayout.LayoutParams center = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER);
+        overlay.addView(wrap, center);
+        host.addView(overlay, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        overlay.bringToFront();
+        overlay.requestApplyInsets();
+
         mark.setScaleX(0.92f);
         mark.setScaleY(0.92f);
         mark.setAlpha(0.45f);
@@ -3383,9 +3404,24 @@ public class MainActivity extends Activity {
         title.setAlpha(0f);
         title.setTranslationY(dp(6));
         title.animate().alpha(1f).translationY(0).setStartDelay(80L).setDuration(360L).setInterpolator(motionEnter).start();
+        sub.setAlpha(0f);
+        sub.animate().alpha(1f).setStartDelay(130L).setDuration(320L).setInterpolator(motionEnter).start();
+        ValueAnimator progress = ValueAnimator.ofFloat(0.12f, 0.78f);
+        progress.setDuration(650L);
+        progress.setInterpolator(motionStandard);
+        progress.addUpdateListener(a -> line.setProgressFraction((Float) a.getAnimatedValue()));
+        progress.start();
+
         main.postDelayed(() -> {
-            if (!dialog.isShowing()) return;
-            wrap.animate().alpha(0f).translationY(-dp(6)).setDuration(220L).setInterpolator(motionStandard).withEndAction(dialog::dismiss).start();
+            if (overlay.getParent() == null) return;
+            wrap.animate().cancel();
+            wrap.animate().alpha(0.92f).translationY(-dp(5)).setDuration(180L).setInterpolator(motionStandard).start();
+            overlay.animate().alpha(0f).setDuration(220L).setInterpolator(motionStandard)
+                    .withEndAction(() -> {
+                        if (overlay.getParent() instanceof ViewGroup) {
+                            ((ViewGroup) overlay.getParent()).removeView(overlay);
+                        }
+                    }).start();
         }, 700L);
     }
 
@@ -3920,16 +3956,44 @@ public class MainActivity extends Activity {
 
     private void configureBottomDialogWindow(Dialog dialog) {
         Window window = dialog.getWindow();
-        if (window != null) {
-            window.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
-            window.setDimAmount(darkModeActive ? 0.58f : 0.42f);
-            window.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
-            window.setGravity(Gravity.BOTTOM);
-            window.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
-            window.setWindowAnimations(com.xnat.mobile.R.style.XnatBottomSheetAnimation);
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) window.setDecorFitsSystemWindows(true);
+        if (window == null) return;
+        window.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+        window.setDimAmount(darkModeActive ? 0.58f : 0.42f);
+        window.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+        window.setGravity(Gravity.BOTTOM);
+        window.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
+        window.setWindowAnimations(com.xnat.mobile.R.style.XnatBottomSheetAnimation);
+        configureWindowSystemBars(window);
+
+        // Dialog windows have their own system-bar surface. Keep them edge-to-edge too,
+        // let the sheet itself paint behind the gesture/3-button navigation area,
+        // then add the navigation inset to its existing bottom padding so controls
+        // remain reachable and the bottom never falls back to a black system strip.
+        View content = window.findViewById(android.R.id.content);
+        if (content instanceof ViewGroup && ((ViewGroup) content).getChildCount() > 0) {
+            View sheet = ((ViewGroup) content).getChildAt(0);
+            applyBottomSheetInsets(sheet);
         }
+    }
+
+    private void applyBottomSheetInsets(View sheet) {
+        if (sheet == null) return;
+        final int baseLeft = sheet.getPaddingLeft();
+        final int baseTop = sheet.getPaddingTop();
+        final int baseRight = sheet.getPaddingRight();
+        final int baseBottom = sheet.getPaddingBottom();
+        sheet.setOnApplyWindowInsetsListener((view, insets) -> {
+            int bottom;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                bottom = insets.getInsets(WindowInsets.Type.navigationBars()).bottom;
+            } else {
+                bottom = insets.getSystemWindowInsetBottom();
+            }
+            view.setPadding(baseLeft, baseTop, baseRight, baseBottom + bottom);
+            return insets;
+        });
+        sheet.requestApplyInsets();
     }
 
     private void swapBottomDialogContent(Dialog dialog, LinearLayout nextSheet, boolean forward) {
@@ -4254,37 +4318,67 @@ public class MainActivity extends Activity {
     }
 
     private void applySystemBarInsets() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            getWindow().setStatusBarColor(BG);
-            getWindow().setNavigationBarColor(BG);
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            WindowInsetsController controller = getWindow().getInsetsController();
-            if (controller != null) {
-                int mask = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS | WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS;
-                controller.setSystemBarsAppearance(darkModeActive ? 0 : mask, mask);
-            }
-        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            int flags = getWindow().getDecorView().getSystemUiVisibility();
-            if (darkModeActive) {
-                flags &= ~View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) flags &= ~View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
-            } else {
-                flags |= View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) flags |= View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
-            }
-            getWindow().getDecorView().setSystemUiVisibility(flags);
-        }
+        configureWindowSystemBars(getWindow());
         root.setOnApplyWindowInsetsListener((view, insets) -> {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                android.graphics.Insets bars = insets.getInsets(WindowInsets.Type.systemBars());
+                android.graphics.Insets bars = insets.getInsets(
+                        WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
+                systemBottomInset = bars.bottom;
                 view.setPadding(bars.left, bars.top, bars.right, bars.bottom);
             } else {
-                view.setPadding(insets.getSystemWindowInsetLeft(), insets.getSystemWindowInsetTop(), insets.getSystemWindowInsetRight(), insets.getSystemWindowInsetBottom());
+                systemBottomInset = insets.getSystemWindowInsetBottom();
+                view.setPadding(insets.getSystemWindowInsetLeft(), insets.getSystemWindowInsetTop(),
+                        insets.getSystemWindowInsetRight(), systemBottomInset);
             }
             return insets;
         });
         root.requestApplyInsets();
+    }
+
+    private void configureWindowSystemBars(Window window) {
+        if (window == null) return;
+
+        // targetSdk 36 is always edge-to-edge on Android 16. Draw the XNAT surface
+        // behind both system bars and use insets only to keep interactive content safe.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            window.setDecorFitsSystemWindows(false);
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            window.setStatusBarColor(Color.TRANSPARENT);
+            window.setNavigationBarColor(Color.TRANSPARENT);
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            window.setNavigationBarContrastEnforced(false);
+            window.setStatusBarContrastEnforced(false);
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            WindowInsetsController controller = window.getInsetsController();
+            if (controller != null) {
+                int mask = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS
+                        | WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS;
+                controller.setSystemBarsAppearance(darkModeActive ? 0 : mask, mask);
+            }
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            int flags = window.getDecorView().getSystemUiVisibility()
+                    | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                    | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN) {
+                flags |= View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION;
+            }
+            if (darkModeActive) {
+                flags &= ~View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    flags &= ~View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
+                }
+            } else {
+                flags |= View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    flags |= View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
+                }
+            }
+            window.getDecorView().setSystemUiVisibility(flags);
+        }
     }
 
     private void applyThemePalette() {
@@ -4553,20 +4647,10 @@ public class MainActivity extends Activity {
     }
 
     private void animateSystemBarColors(int from, int to) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) return;
-        // applySystemBarInsets has already set icon brightness for the target theme.
-        // Put the bar colors back at the old value and interpolate them to the target.
-        getWindow().setStatusBarColor(from);
-        getWindow().setNavigationBarColor(from);
-        ValueAnimator bars = ValueAnimator.ofObject(new ArgbEvaluator(), from, to);
-        bars.setDuration(225L);
-        bars.setInterpolator(motionStandard);
-        bars.addUpdateListener(animation -> {
-            int color = (Integer) animation.getAnimatedValue();
-            getWindow().setStatusBarColor(color);
-            getWindow().setNavigationBarColor(color);
-        });
-        bars.start();
+        // System bars stay transparent in edge-to-edge mode. The root background and
+        // theme snapshot already cross-fade underneath them, so animating bar colors
+        // separately would reintroduce a visible strip on Android 15/16.
+        configureWindowSystemBars(getWindow());
     }
 
     private int beginStableRender(LinearLayout page) {
@@ -4899,7 +4983,11 @@ public class MainActivity extends Activity {
                 Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
         lp.leftMargin = dp(22);
         lp.rightMargin = dp(22);
-        lp.bottomMargin = navBar != null && navBar.isAttachedToWindow() ? dp(88) : dp(22);
+        // overlayHost itself is edge-to-edge, so include the navigation inset in
+        // addition to the XNAT bottom-nav clearance. This keeps notices floating
+        // above both the app navigation and the system gesture area on every device.
+        lp.bottomMargin = (navBar != null && navBar.isAttachedToWindow() ? dp(88) : dp(22))
+                + systemBottomInset;
         overlayHost.addView(notice, lp);
         transientNoticeView = notice;
 

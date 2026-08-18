@@ -72,25 +72,39 @@ final class GitHubUpdateManager {
             String shaUrl = "";
             JSONArray assets = json.optJSONArray("assets");
             if (assets != null) {
+                String expectedApk = ("XNAT-Android-" + tag + ".apk").toLowerCase(Locale.US);
+                int apkCount = 0;
+                String onlyApkName = "";
+                String onlyApkUrl = "";
                 for (int i = 0; i < assets.length(); i++) {
                     JSONObject a = assets.optJSONObject(i);
                     if (a == null) continue;
                     String name = a.optString("name", "");
                     String download = a.optString("browser_download_url", "");
                     String lower = name.toLowerCase(Locale.US);
-                    if (lower.endsWith(".apk") && apkUrl.isEmpty()) {
+                    if (!lower.endsWith(".apk")) continue;
+                    apkCount++;
+                    onlyApkName = name;
+                    onlyApkUrl = download;
+                    if (lower.equals(expectedApk)) {
                         apkName = name;
                         apkUrl = download;
                     }
                 }
+                // Backward-compatible fallback is allowed only when the Release has
+                // exactly one APK. Multiple APKs without the canonical XNAT name are
+                // ambiguous and must never be chosen at random.
+                if (apkUrl.isEmpty() && apkCount == 1) {
+                    apkName = onlyApkName;
+                    apkUrl = onlyApkUrl;
+                }
                 if (!apkName.isEmpty()) {
-                    String exact = (apkName + ".sha256").toLowerCase(Locale.US);
+                    String exactSha = (apkName + ".sha256").toLowerCase(Locale.US);
                     for (int i = 0; i < assets.length(); i++) {
                         JSONObject a = assets.optJSONObject(i);
                         if (a == null) continue;
                         String name = a.optString("name", "");
-                        String lower = name.toLowerCase(Locale.US);
-                        if (lower.equals(exact) || (lower.endsWith(".sha256") && lower.contains("apk"))) {
+                        if (name.toLowerCase(Locale.US).equals(exactSha)) {
                             shaUrl = a.optString("browser_download_url", "");
                             break;
                         }
@@ -98,8 +112,8 @@ final class GitHubUpdateManager {
                 }
             }
             if (tag.isEmpty()) throw new Exception("Release 缺少版本号");
-            if (apkUrl.isEmpty()) throw new Exception("Release 中没有找到 APK 资产");
-            if (shaUrl.isEmpty()) throw new Exception("Release 中没有找到 APK SHA-256 校验文件");
+            if (apkUrl.isEmpty()) throw new Exception("Release 中没有找到唯一且匹配的 XNAT APK 资产");
+            if (shaUrl.isEmpty()) throw new Exception("Release 缺少与 APK 同名的 .sha256 校验文件");
             return new UpdateInfo(tag, version, title, body, apkName, apkUrl, shaUrl, html);
         } finally {
             conn.disconnect();

@@ -1,8 +1,14 @@
-# XNAT Android v1.2.0-dev2
+# XNAT Android v1.2.0-dev3
 
-XNAT 官方原生 Android 客户端。v1.2.0-dev2 基于 v1.1.0 正式版做最小增量升级，对接 XNAT Panel v1.4.2 / Mobile API v1。
+XNAT 官方原生 Android 客户端。v1.2.0-dev3 基于 v1.1.0 正式版做最小增量升级，对接 XNAT Panel v1.4.2 / Mobile API v1。
 
-## v1.2.0-dev2
+## v1.2.0-dev3
+
+- 修复 Android 15/16 edge-to-edge 启动页底部黑色系统导航条：启动遮罩改为 Activity 内全屏覆盖层，状态栏/导航栏统一透明并由 XNAT 背景延伸绘制。
+- Bottom Sheet 同步适配 edge-to-edge 与导航栏 Insets，避免充值、更新、删除/重置确认等底部弹层出现同类黑边或遮挡。
+- 深浅主题切换时系统栏保持透明，由页面背景自然过渡，避免状态栏/导航栏闪色。
+- 自动更新 Release 资产选择更严格：优先匹配 `XNAT-Android-v版本.apk`，多 APK 时拒绝随机选择，并强制要求与 APK 同名的 `.sha256`。
+- 悬浮提示位置同步计入系统导航栏 Insets，避免全面屏手势区域导致提示与 XNAT 底部导航重叠。
 
 - 提示反馈 UI 收口：替换 Android 系统 Toast 为 XNAT 应用内悬浮胶囊，自动适配浅色/深色主题、成功/失败状态与底部导航，不再显示割裂的系统 App 图标 Toast。
 
@@ -26,8 +32,8 @@ XNAT 官方原生 Android 客户端。v1.2.0-dev2 基于 v1.1.0 正式版做最�
 - Host Agent：v1.1.1
 - Agent API：v1
 - Application ID：`com.xnat.mobile`
-- Version Name：`1.2.0-dev2`
-- Version Code：`10202`
+- Version Name：`1.2.0-dev3`
+- Version Code：`10203`
 - Min SDK：26
 - Target / Compile SDK：36
 
@@ -53,9 +59,9 @@ GitHub Actions 构建时会自动使用当前 `GITHUB_REPOSITORY` 作为更新�
 
 构建产物：
 
-- Artifact：`XNAT-Android-v1.2.0-dev2`
-- APK：`XNAT-Android-v1.2.0-dev2.apk`
-- SHA-256：`XNAT-Android-v1.2.0-dev2.apk.sha256`
+- Artifact：`XNAT-Android-v1.2.0-dev3`
+- APK：`XNAT-Android-v1.2.0-dev3.apk`
+- SHA-256：`XNAT-Android-v1.2.0-dev3.apk.sha256`
 
 继续使用 v1.1.0 相同正式签名证书时，可直接覆盖升级并保留登录、主题和本地设置。
 

@@ -21,8 +21,8 @@ android {
         applicationId 'com.xnat.mobile'
         minSdk 26
         targetSdk 36
-        versionCode 10202
-        versionName '1.2.0-dev2'
+        versionCode 10203
+        versionName '1.2.0-dev3'
         buildConfigField "String", "GITHUB_REPO", "\"${githubRepo}\""
         manifestPlaceholders = [usesCleartextTraffic: 'false']
     }
