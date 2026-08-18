@@ -21,7 +21,7 @@ final class ApiClient {
             conn.setReadTimeout(25000);
             conn.setRequestMethod(method);
             conn.setRequestProperty("Accept", "application/json");
-            conn.setRequestProperty("User-Agent", "XNAT-Android/1.1.0");
+            conn.setRequestProperty("User-Agent", "XNAT-Android/" + BuildConfig.VERSION_NAME);
             conn.setUseCaches(false);
             if (token != null && !token.isEmpty()) {
                 conn.setRequestProperty("Authorization", "Bearer " + token);

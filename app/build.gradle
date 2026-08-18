@@ -7,6 +7,7 @@ def releaseStorePassword = System.getenv('XNAT_KEYSTORE_PASSWORD')
 def releaseKeyAlias = System.getenv('XNAT_KEY_ALIAS')
 def releaseKeyPassword = System.getenv('XNAT_KEY_PASSWORD')
 def isReleaseBuild = gradle.startParameter.taskNames.any { it.toLowerCase().contains('release') }
+def githubRepo = System.getenv('XNAT_GITHUB_REPO') ?: System.getenv('GITHUB_REPOSITORY') ?: 'kkx999/XNAT-Android'
 
 if (isReleaseBuild && (!releaseKeystoreFile || !releaseStorePassword || !releaseKeyAlias || !releaseKeyPassword)) {
     throw new GradleException('Release signing is not configured. Set XNAT_KEYSTORE_FILE, XNAT_KEYSTORE_PASSWORD, XNAT_KEY_ALIAS, and XNAT_KEY_PASSWORD.')
@@ -20,8 +21,9 @@ android {
         applicationId 'com.xnat.mobile'
         minSdk 26
         targetSdk 36
-        versionCode 10103
-        versionName '1.1.0'
+        versionCode 10201
+        versionName '1.2.0-dev1'
+        buildConfigField "String", "GITHUB_REPO", "\"${githubRepo}\""
         manifestPlaceholders = [usesCleartextTraffic: 'false']
     }
 
@@ -47,6 +49,10 @@ android {
             minifyEnabled false
             manifestPlaceholders = [usesCleartextTraffic: 'false']
         }
+    }
+
+    buildFeatures {
+        buildConfig true
     }
 
     compileOptions {
@@ -82,4 +88,6 @@ tasks.named('preBuild').configure {
 
 dependencies {
     implementation "androidx.swiperefreshlayout:swiperefreshlayout:1.2.0"
+    implementation "androidx.core:core:1.13.1"
+    implementation "com.google.zxing:core:3.5.3"
 }

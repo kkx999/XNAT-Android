@@ -9,6 +9,8 @@ import android.animation.AnimatorListenerAdapter;
 import android.animation.TimeInterpolator;
 import android.animation.ValueAnimator;
 import android.content.Intent;
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.SharedPreferences;
 import android.content.res.ColorStateList;
 import android.content.res.Configuration;
@@ -16,6 +18,7 @@ import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
+import android.graphics.Outline;
 import android.graphics.RectF;
 import android.graphics.Typeface;
 import android.graphics.drawable.ColorDrawable;
@@ -26,11 +29,13 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.provider.Settings;
 import android.text.InputType;
 import android.view.Gravity;
 import android.view.HapticFeedbackConstants;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.ViewOutlineProvider;
 import android.view.Window;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
@@ -50,11 +55,17 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
+import androidx.core.content.FileProvider;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import com.google.zxing.BarcodeFormat;
+import com.google.zxing.MultiFormatWriter;
+import com.google.zxing.common.BitMatrix;
+
 import java.text.DecimalFormat;
+import java.io.File;
 import java.util.Calendar;
 import java.util.HashMap;
 import java.util.Map;
@@ -110,6 +121,11 @@ public class MainActivity extends Activity {
     private JSONObject cachedSupport = null;
     private JSONObject cachedMe = null;
     private JSONObject cachedCatalog = null;
+    private int billingSection = 0; // 0 订单 / 1 流水 / 2 充值
+    private String billingMonth = "";
+    private boolean updateCheckInProgress = false;
+    private String pendingInstallPath = "";
+    private static final long UPDATE_CHECK_INTERVAL_MS = 12L * 60L * 60L * 1000L;
     private final Map<Integer, JSONObject> cachedServerDetails = new HashMap<>();
     private final Map<Integer, JSONObject> cachedTicketDetails = new HashMap<>();
 
@@ -174,6 +190,8 @@ public class MainActivity extends Activity {
         } else {
             showLogin();
         }
+        showStartupOverlay();
+        main.postDelayed(() -> checkForUpdates(false), 950L);
     }
 
     private void showLogin() {
@@ -319,7 +337,7 @@ public class MainActivity extends Activity {
         secLp.topMargin = dp(18);
         page.addView(securityRow, secLp);
 
-        TextView footer = text("XNAT Android v1.1.0", 10, MUTED, false);
+        TextView footer = text("XNAT Android v" + BuildConfig.VERSION_NAME, 10, MUTED, false);
         footer.setGravity(Gravity.CENTER_HORIZONTAL);
         footer.setAlpha(0.72f);
         LinearLayout.LayoutParams footerLp = matchWrap();
@@ -797,14 +815,29 @@ public class MainActivity extends Activity {
             hero.setPadding(dp(18), dp(18), dp(18), dp(18));
             LinearLayout titleRow = horizontalRow();
             titleRow.setGravity(Gravity.CENTER_VERTICAL);
+            titleRow.addView(flagView(s.optString("country", "")), new LinearLayout.LayoutParams(dp(48), dp(32)));
+            gapH(titleRow, 12);
             LinearLayout nameBlock = column();
-            nameBlock.addView(text(s.optString("name", "VPS"), 24, INK, true));
-            TextView ip = text(s.optString("public_ip", "-") + portSuffix(s.optInt("ssh_port", 0)), 13, MUTED, false);
-            ip.setPadding(0, dp(5), 0, 0);
-            nameBlock.addView(ip);
+            LinearLayout idRow = horizontalRow();
+            idRow.setGravity(Gravity.CENTER_VERTICAL);
+            View statusDot = new View(this);
+            statusDot.setBackground(roundRect(statusColor(status), dp(99), 0, 0));
+            idRow.addView(statusDot, new LinearLayout.LayoutParams(dp(8), dp(8)));
+            gapH(idRow, 7);
+            idRow.addView(text(displayServerId(s), 23, INK, true));
+            String os = osShort(s.optString("os_name", ""));
+            if (!os.isEmpty()) { gapH(idRow, 7); idRow.addView(pill(os, MUTED, SOFT)); }
+            String virt = s.optString("virtualization_type", "").trim();
+            if (!virt.isEmpty()) { gapH(idRow, 6); idRow.addView(pill(virt.toUpperCase(), BLUE, BLUE_SOFT)); }
+            nameBlock.addView(idRow, matchWrap());
+            TextView location = text(serverRegionPlan(s), 12, MUTED, false);
+            location.setPadding(0, dp(5), 0, 0);
+            nameBlock.addView(location);
             titleRow.addView(nameBlock, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
-            titleRow.addView(pill(statusLabel(status), statusColor(status), statusBackground(status)));
+            titleRow.addView(pill(s.optString("status_label", statusLabel(status)), statusColor(status), statusBackground(status)));
             hero.addView(titleRow, matchWrap());
+            gap(hero, 13);
+            hero.addView(infoRow("连接地址", blankDash(s.optString("public_ip", "")) + portSuffix(s.optInt("ssh_port", 0))));
             page.addView(hero, matchWrap());
             gap(page, 14);
 
@@ -812,6 +845,24 @@ public class MainActivity extends Activity {
             actionsCard.setPadding(dp(8), dp(5), dp(8), dp(5));
             actionsCard.addView(powerActions(s), matchWrap());
             page.addView(actionsCard, matchWrap());
+            gap(page, 22);
+
+            page.addView(sectionHeader("节点信息", "由 Panel 动态下发的服务器位置与线路", ""));
+            gap(page, 10);
+            LinearLayout node = surfaceCard(18);
+            node.setPadding(dp(16), dp(6), dp(16), dp(6));
+            node.addView(infoRow("国家 / 地区", blankDash(s.optString("country_name", ""))));
+            node.addView(thinDivider());
+            node.addView(infoRow("服务器地区", blankDash(s.optString("region", ""))));
+            node.addView(thinDivider());
+            node.addView(infoRow("区域代码", blankDash(s.optString("region_code", ""))));
+            node.addView(thinDivider());
+            node.addView(infoRow("网络线路", blankDash(s.optString("network_line", ""))));
+            node.addView(thinDivider());
+            node.addView(infoRow("NAT 端口", s.optInt("nat_port", s.optInt("port_limit", 0)) + " 个"));
+            node.addView(thinDivider());
+            node.addView(infoRow("套餐", blankDash(s.optString("plan_name", ""))));
+            page.addView(node, matchWrap());
             gap(page, 22);
 
             page.addView(sectionHeader("资源配置", "实例规格与系统信息", ""));
@@ -848,49 +899,52 @@ public class MainActivity extends Activity {
             page.addView(portManagementCard(s), matchWrap());
             gap(page, 22);
 
-            page.addView(sectionHeader("流量与生命周期", "配额、到期与当前生命周期", ""));
+            page.addView(sectionHeader("流量与生命周期", "配额、流量周期与到期状态", ""));
             gap(page, 10);
             LinearLayout life = surfaceCard(18);
             life.setPadding(dp(16), dp(14), dp(16), dp(14));
             long used = s.optLong("traffic_used_bytes", 0);
             int quota = s.optInt("traffic_quota_gb", 0);
             life.addView(infoRow("已用流量", bytes(used) + " / " + quota + " GB"));
-            ProgressBar traffic = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
-            traffic.setMax(1000);
-            traffic.setProgress(trafficProgress(used, quota));
-            traffic.setProgressTintList(ColorStateList.valueOf(s.optBoolean("traffic_throttled", false) ? AMBER : BLUE));
-            traffic.setProgressBackgroundTintList(ColorStateList.valueOf(BORDER));
-            LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(5));
-            tlp.topMargin = dp(8);
-            tlp.bottomMargin = dp(10);
-            life.addView(traffic, tlp);
+            life.addView(capsuleTraffic(used, quota, s.optBoolean("traffic_throttled", false)), capsuleLp(8, 10, 10));
             life.addView(thinDivider());
             life.addView(infoRow("剩余流量", bytes(s.optLong("traffic_remaining_bytes", 0))));
+            life.addView(thinDivider());
+            life.addView(infoRow("流量周期", dateRange(s.optString("traffic_cycle_start", ""), s.optString("traffic_cycle_end", ""))));
             life.addView(thinDivider());
             life.addView(infoRow("到期时间", s.isNull("expires_at") ? "长期有效" : cleanDate(s.optString("expires_at"))));
             JSONObject lifecycle = s.optJSONObject("lifecycle");
             if (lifecycle != null) {
                 life.addView(thinDivider());
-                String code = lifecycle.optString("code", "active");
-                life.addView(infoRow("生命周期", lifecycleLabel(code)));
+                life.addView(infoRow("生命周期", lifecycleLabel(lifecycle.optString("code", "active"))));
             }
             page.addView(life, matchWrap());
+            gap(page, 10);
+            page.addView(trafficResetCard(s), matchWrap());
             gap(page, 22);
 
-            page.addView(sectionHeader("系统管理", "重装操作会清空系统盘，请谨慎执行", ""));
+            page.addView(sectionHeader("系统管理", "重装与删除均为高风险操作", ""));
             gap(page, 10);
             LinearLayout systemCard = surfaceCard(18);
             systemCard.setPadding(dp(16), dp(14), dp(16), dp(14));
             systemCard.addView(infoRow("当前系统", blankDash(s.optString("os_name", ""))));
             systemCard.addView(thinDivider());
-            TextView warning = text("重装系统会删除当前系统盘数据，并重新生成登录凭据。提交后任务会在后台执行。", 12, RED, false);
+            TextView warning = text("重装系统会清空系统盘；删除服务器会永久移除实例。请确认数据已备份。", 12, RED, false);
             warning.setPadding(0, dp(12), 0, dp(12));
             systemCard.addView(warning);
+            LinearLayout buttons = horizontalRow();
             Button reinstall = sheetButton("重装系统", RED, RED_SOFT, 0);
+            Button delete = sheetButton("删除服务器", Color.WHITE, RED, 0);
+            boolean manageable = isManagementStatus(status);
+            setActionEnabled(reinstall, manageable);
+            setActionEnabled(delete, !"deleting".equals(status));
             reinstall.setOnClickListener(v -> showReinstallSheet(s));
-            systemCard.addView(reinstall, matchWrap());
+            delete.setOnClickListener(v -> showDeleteServerSheet(s));
+            buttons.addView(reinstall, weighted());
+            gapH(buttons, 10);
+            buttons.addView(delete, weighted());
+            systemCard.addView(buttons, matchWrap());
             page.addView(systemCard, matchWrap());
-        
         } finally {
             endStableRender(page, keepScrollY);
         }
@@ -1046,7 +1100,7 @@ public class MainActivity extends Activity {
         }
         names.addView(nameRow, matchWrap());
         String virt = plan.optString("virtualization_type", "lxc").toUpperCase();
-        TextView meta = text(virt + " · " + plan.optInt("port_count", 0) + " 个 NAT 端口", 11, MUTED, false);
+        TextView meta = text(virt + " · " + plan.optInt("nat_port", plan.optInt("port_count", 0)) + " 个 NAT 端口", 11, MUTED, false);
         meta.setPadding(0, dp(4), 0, 0);
         names.addView(meta);
         top.addView(names, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
@@ -1061,6 +1115,12 @@ public class MainActivity extends Activity {
         spec.addView(infoRow("配置", plan.optInt("cpu", 0) + " vCPU · " + plan.optInt("memory_mb", 0) + " MB · " + plan.optInt("disk_gb", 0) + " GB"));
         spec.addView(thinDivider());
         spec.addView(infoRow("网络", plan.optInt("bandwidth_mbps", 0) + " Mbps · " + plan.optInt("traffic_gb", 0) + " GB 流量"));
+        spec.addView(thinDivider());
+        spec.addView(infoRow("服务器地区", blankDash(plan.optString("region", ""))));
+        spec.addView(thinDivider());
+        spec.addView(infoRow("网络线路", blankDash(plan.optString("network_line", ""))));
+        spec.addView(thinDivider());
+        spec.addView(infoRow("NAT 端口", plan.optInt("nat_port", plan.optInt("port_count", 0)) + " 个"));
         card.addView(spec, matchWrap());
         gap(card, 14);
 
@@ -1069,6 +1129,9 @@ public class MainActivity extends Activity {
         LinearLayout price = column();
         price.addView(text("月付", 10, MUTED, false));
         price.addView(text("¥" + money(plan.optLong("monthly_price_cents", 0)), 22, INK, true));
+        TextView reset = text("流量重置 ¥" + money(plan.optLong("traffic_reset_price_cents", 0)), 10, MUTED, false);
+        reset.setPadding(0, dp(2), 0, 0);
+        price.addView(reset);
         bottom.addView(price, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
         Button choose = sheetButton(soldOut ? "已售罄" : "选择套餐", Color.WHITE, soldOut ? MUTED : BLUE, 0);
         setActionEnabled(choose, !soldOut);
@@ -1098,7 +1161,13 @@ public class MainActivity extends Activity {
         summary.addView(thinDivider());
         summary.addView(infoRow("硬盘 / 带宽", plan.optInt("disk_gb", 0) + " GB / " + plan.optInt("bandwidth_mbps", 0) + " Mbps"));
         summary.addView(thinDivider());
-        summary.addView(infoRow("流量 / 端口", plan.optInt("traffic_gb", 0) + " GB / " + plan.optInt("port_count", 0) + " 个"));
+        summary.addView(infoRow("流量 / 端口", plan.optInt("traffic_gb", 0) + " GB / " + plan.optInt("nat_port", plan.optInt("port_count", 0)) + " 个"));
+        summary.addView(thinDivider());
+        summary.addView(infoRow("服务器地区", blankDash(plan.optString("region", ""))));
+        summary.addView(thinDivider());
+        summary.addView(infoRow("网络线路", blankDash(plan.optString("network_line", ""))));
+        summary.addView(thinDivider());
+        summary.addView(infoRow("NAT 端口", plan.optInt("nat_port", plan.optInt("port_count", 0)) + " 个"));
         sheet.addView(summary, matchWrap());
         gap(sheet, 14);
 
@@ -1253,7 +1322,7 @@ public class MainActivity extends Activity {
             buttons.addView(recharge, weighted());
             recharge.setOnClickListener(v -> {
                 dialog.dismiss();
-                openRechargePage();
+                showRechargeStartSheet();
             });
         }
         sheet.addView(buttons, matchWrap());
@@ -1288,7 +1357,7 @@ public class MainActivity extends Activity {
                     JSONObject server = out.optJSONObject("server");
                     JSONObject job = out.optJSONObject("job");
                     int serverId = server == null ? 0 : server.optInt("id", 0);
-                    String serverName = server == null ? "新服务器" : server.optString("name", "新服务器");
+                    String serverName = server == null ? "新服务器" : displayServerId(server);
                     int jobId = job == null ? 0 : job.optInt("id", 0);
                     showPurchaseSuccessSheet(serverId, serverName, jobId, out.optLong("balance_after_cents", 0));
                 });
@@ -1329,15 +1398,11 @@ public class MainActivity extends Activity {
     }
 
     private void openRechargePage() {
-        try {
-            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(ApiClient.normalizeBase(baseUrl) + "/recharge"));
-            startActivity(intent);
-        } catch (Exception e) {
-            toast("无法打开充值页面");
-        }
+        showRechargeStartSheet();
     }
 
     private void showBillingPage() {
+        if (billingMonth.isEmpty()) billingMonth = currentMonth();
         int gen = screenGeneration;
         SwipeRefreshLayout swipe = swipeContainer();
         ScrollView scroll = new ScrollView(this);
@@ -1351,19 +1416,21 @@ public class MainActivity extends Activity {
             loadBilling(gen, swipe, page, false);
         }), matchWrap());
         gap(page, 18);
-        boolean hasCache = cachedBilling != null;
+        boolean hasCache = cachedBilling != null && billingMonth.equals(cachedBilling.optString("selected_month", ""));
         if (hasCache) renderBilling(page, cachedBilling);
-        else showInlineLoading(page, "正在读取账务数据…");
+        else showInlineLoading(page, "正在读取 " + formatMonth(billingMonth) + " 账务…");
         swipe.setOnRefreshListener(() -> loadBilling(gen, swipe, page, false));
         loadBilling(gen, swipe, page, !hasCache);
     }
 
     private void loadBilling(int gen, SwipeRefreshLayout swipe, LinearLayout page, boolean first) {
+        final String requestedMonth = billingMonth;
         io.execute(() -> {
             try {
-                JSONObject data = ApiClient.request(baseUrl, "/api/v1/billing", "GET", token, null);
+                String path = "/api/v1/billing" + (requestedMonth.isEmpty() ? "" : "?month=" + requestedMonth);
+                JSONObject data = ApiClient.request(baseUrl, path, "GET", token, null);
                 main.post(() -> {
-                    if (!validScreen(gen, TAB_BILLING)) return;
+                    if (!validScreen(gen, TAB_BILLING) || !requestedMonth.equals(billingMonth)) return;
                     swipe.setRefreshing(false);
                     cachedBilling = data;
                     renderBilling(page, data);
@@ -1386,56 +1453,95 @@ public class MainActivity extends Activity {
             LinearLayout hero = column();
             hero.setBackground(gradientRoundRect(NAVY, NAVY_2, 22));
             hero.setPadding(dp(20), dp(18), dp(20), dp(18));
-            hero.addView(text("可用余额", 12, Color.rgb(191, 203, 221), false));
+            LinearLayout balanceTop = horizontalRow();
+            balanceTop.setGravity(Gravity.CENTER_VERTICAL);
+            LinearLayout balanceCopy = column();
+            balanceCopy.addView(text("可用余额", 12, Color.rgb(191, 203, 221), false));
             TextView balance = text("¥" + money(summary.optLong("balance_cents", 0)), 30, Color.WHITE, true);
-            balance.setPadding(0, dp(3), 0, dp(14));
-            hero.addView(balance);
+            balance.setPadding(0, dp(3), 0, 0);
+            balanceCopy.addView(balance);
+            balanceTop.addView(balanceCopy, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+            Button recharge = sheetButton("充值", NAVY, Color.WHITE, 0);
+            LinearLayout.LayoutParams rechargeLp = new LinearLayout.LayoutParams(dp(88), dp(42));
+            balanceTop.addView(recharge, rechargeLp);
+            recharge.setOnClickListener(v -> showRechargeStartSheet());
+            hero.addView(balanceTop, matchWrap());
+            gap(hero, 14);
             LinearLayout heroRow = horizontalRow();
             heroRow.addView(miniMetric("累计消费", "¥" + money(summary.optLong("total_spend_cents", 0))), weighted());
             heroRow.addView(miniMetric("订单", String.valueOf(summary.optInt("order_count", 0))), weighted());
             heroRow.addView(miniMetric("充值", String.valueOf(summary.optInt("recharge_count", 0))), weighted());
             hero.addView(heroRow, matchWrap());
             page.addView(hero, matchWrap());
-            gap(page, 24);
+            gap(page, 18);
 
-            JSONArray orders = data.optJSONArray("orders");
-            page.addView(sectionHeader("订单", "最近的服务购买与续费记录", orders == null ? "0" : String.valueOf(orders.length())));
-            gap(page, 10);
-            if (orders == null || orders.length() == 0) page.addView(emptyCard("暂无订单", "当前账户还没有订单记录。"), matchWrap());
-            else {
-                for (int i = 0; i < Math.min(orders.length(), 20); i++) {
+            LinearLayout filter = surfaceCard(18);
+            filter.setPadding(dp(14), dp(12), dp(14), dp(12));
+            LinearLayout monthRow = horizontalRow();
+            monthRow.setGravity(Gravity.CENTER_VERTICAL);
+            LinearLayout monthCopy = column();
+            monthCopy.addView(text("账务月份", 11, MUTED, false));
+            monthCopy.addView(text(formatMonth(billingMonth), 17, INK, true));
+            monthRow.addView(monthCopy, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+            Button month = compactButton("切换月份 ▾");
+            month.setTextColor(BLUE);
+            month.setOnClickListener(v -> showBillingMonthSheet(data));
+            monthRow.addView(month);
+            filter.addView(monthRow, matchWrap());
+            gap(filter, 12);
+            LinearLayout segments = horizontalRow();
+            segments.setBackground(roundRect(SOFT, dp(15), 0, 0));
+            segments.setPadding(dp(3), dp(3), dp(3), dp(3));
+            String[] labels = {"订单", "余额流水", "充值记录"};
+            for (int i = 0; i < labels.length; i++) {
+                final int section = i;
+                TextView b = text(labels[i], 12, billingSection == i ? BLUE : MUTED, billingSection == i);
+                b.setGravity(Gravity.CENTER);
+                b.setPadding(dp(6), dp(10), dp(6), dp(10));
+                b.setBackground(rippleRoundRect(billingSection == i ? CARD : Color.TRANSPARENT, 12, billingSection == i ? BORDER : 0, RIPPLE));
+                b.setOnClickListener(v -> { billingSection = section; renderBilling(page, data); });
+                segments.addView(b, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+            }
+            filter.addView(segments, matchWrap());
+            page.addView(filter, matchWrap());
+            gap(page, 22);
+
+            if (billingSection == 0) {
+                JSONArray orders = data.optJSONArray("orders");
+                page.addView(sectionHeader("订单", formatMonth(billingMonth) + " · 服务购买与续费", orders == null ? "0" : String.valueOf(orders.length())));
+                gap(page, 10);
+                if (orders == null || orders.length() == 0) page.addView(emptyCard("本月暂无订单", "选择其他月份可以查看历史订单。"), matchWrap());
+                else for (int i = 0; i < orders.length(); i++) {
                     JSONObject o = orders.optJSONObject(i);
                     if (o != null) page.addView(orderCard(o), matchWrap());
-                    if (i < Math.min(orders.length(), 20) - 1) gap(page, 9);
+                    if (i < orders.length() - 1) gap(page, 9);
                 }
-            }
-            gap(page, 24);
-
-            JSONArray ledger = data.optJSONArray("ledger");
-            page.addView(sectionHeader("余额流水", "最近的余额变动", ledger == null ? "0" : String.valueOf(ledger.length())));
-            gap(page, 10);
-            if (ledger == null || ledger.length() == 0) page.addView(emptyCard("暂无流水", "当前账户还没有余额流水。"), matchWrap());
-            else {
-                for (int i = 0; i < Math.min(ledger.length(), 20); i++) {
+            } else if (billingSection == 1) {
+                JSONArray ledger = data.optJSONArray("ledger");
+                page.addView(sectionHeader("余额流水", formatMonth(billingMonth) + " · 账户余额变化", ledger == null ? "0" : String.valueOf(ledger.length())));
+                gap(page, 10);
+                if (ledger == null || ledger.length() == 0) page.addView(emptyCard("本月暂无流水", "选择其他月份可以查看历史余额变化。"), matchWrap());
+                else for (int i = 0; i < ledger.length(); i++) {
                     JSONObject row = ledger.optJSONObject(i);
                     if (row != null) page.addView(ledgerCard(row), matchWrap());
-                    if (i < Math.min(ledger.length(), 20) - 1) gap(page, 9);
+                    if (i < ledger.length() - 1) gap(page, 9);
                 }
-            }
-            gap(page, 24);
-
-            JSONArray recharges = data.optJSONArray("recharges");
-            page.addView(sectionHeader("充值记录", "最近的 USDT 充值订单", recharges == null ? "0" : String.valueOf(recharges.length())));
-            gap(page, 10);
-            if (recharges == null || recharges.length() == 0) page.addView(emptyCard("暂无充值", "当前账户还没有充值记录。"), matchWrap());
-            else {
-                for (int i = 0; i < Math.min(recharges.length(), 20); i++) {
+            } else {
+                JSONArray recharges = data.optJSONArray("recharges");
+                page.addView(sectionHeader("充值记录", formatMonth(billingMonth) + " · USDT 充值订单", recharges == null ? "0" : String.valueOf(recharges.length())));
+                gap(page, 10);
+                if (recharges == null || recharges.length() == 0) page.addView(emptyCard("本月暂无充值", "点击上方“充值”即可创建 USDT 订单。"), matchWrap());
+                else for (int i = 0; i < recharges.length(); i++) {
                     JSONObject r = recharges.optJSONObject(i);
-                    if (r != null) page.addView(rechargeCard(r), matchWrap());
-                    if (i < Math.min(recharges.length(), 20) - 1) gap(page, 9);
+                    if (r != null) {
+                        LinearLayout card = rechargeCard(r);
+                        final int rechargeId = r.optInt("id", 0);
+                        card.setOnClickListener(v -> loadRechargeOrder(rechargeId));
+                        page.addView(card, matchWrap());
+                    }
+                    if (i < recharges.length() - 1) gap(page, 9);
                 }
             }
-        
         } finally {
             endStableRender(page, keepScrollY);
         }
@@ -2025,7 +2131,8 @@ public class MainActivity extends Activity {
             about.setPadding(dp(16), dp(6), dp(16), dp(6));
             about.addView(infoRow("应用", "XNAT Android"));
             about.addView(thinDivider());
-            LinearLayout versionRow = infoRow("版本", "1.1.0");
+            LinearLayout versionRow = infoRow("版本", "v" + BuildConfig.VERSION_NAME + " · 检查更新 ›");
+            versionRow.setOnClickListener(v -> { subtleHaptic(v); checkForUpdates(true); });
             versionRow.setOnLongClickListener(v -> {
                 subtleHaptic(v);
                 showAdvancedServerSettings();
@@ -2034,6 +2141,8 @@ public class MainActivity extends Activity {
             about.addView(versionRow);
             about.addView(thinDivider());
             about.addView(infoRow("Mobile API", "v1"));
+            about.addView(thinDivider());
+            about.addView(infoRow("更新通道", "GitHub Releases · SHA-256 校验"));
             page.addView(about, matchWrap());
             gap(page, 20);
 
@@ -2054,43 +2163,59 @@ public class MainActivity extends Activity {
 
         LinearLayout titleRow = horizontalRow();
         titleRow.setGravity(Gravity.CENTER_VERTICAL);
-        LinearLayout identity = column();
-        identity.addView(text(s.optString("name", "VPS"), 18, INK, true));
-        TextView address = text(blankDash(s.optString("public_ip", "")) + portSuffix(s.optInt("ssh_port", 0)), 13, MUTED, false);
-        address.setPadding(0, dp(4), 0, 0);
-        identity.addView(address);
-        titleRow.addView(identity, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
-        titleRow.addView(pill(statusLabel(status), statusColor(status), statusBackground(status)));
-        c.addView(titleRow, matchWrap());
-        gap(c, 14);
+        ImageView flag = flagView(s.optString("country", ""));
+        titleRow.addView(flag, new LinearLayout.LayoutParams(dp(42), dp(28)));
+        gapH(titleRow, 11);
 
-        LinearLayout spec = roundedBox(SOFT_BLUE, 14, 0, 0);
-        spec.setPadding(dp(13), dp(11), dp(13), dp(11));
-        spec.addView(text("配置", 11, MUTED, true));
-        TextView specValue = text(s.optInt("cpu", 0) + " vCPU · " + s.optInt("memory_mb", 0) + " MB · " + s.optInt("disk_gb", 0) + " GB · " + s.optInt("bandwidth_mbps", 0) + " Mbps", 13, INK, false);
-        specValue.setPadding(0, dp(4), 0, 0);
-        spec.addView(specValue);
-        c.addView(spec, matchWrap());
+        LinearLayout identity = column();
+        LinearLayout nameRow = horizontalRow();
+        nameRow.setGravity(Gravity.CENTER_VERTICAL);
+        View statusDot = new View(this);
+        statusDot.setBackground(roundRect(statusColor(status), dp(99), 0, 0));
+        nameRow.addView(statusDot, new LinearLayout.LayoutParams(dp(7), dp(7)));
+        gapH(nameRow, 7);
+        nameRow.addView(text(displayServerId(s), 18, INK, true));
+        String os = osShort(s.optString("os_name", ""));
+        if (!os.isEmpty()) {
+            gapH(nameRow, 7);
+            nameRow.addView(pill(os, MUTED, SOFT));
+        }
+        String virt = s.optString("virtualization_type", "").trim();
+        if (!virt.isEmpty()) {
+            gapH(nameRow, 6);
+            nameRow.addView(pill(virt.toUpperCase(), BLUE, BLUE_SOFT));
+        }
+        identity.addView(nameRow, matchWrap());
+        TextView regionPlan = text(serverRegionPlan(s), 12, MUTED, false);
+        regionPlan.setPadding(0, dp(4), 0, 0);
+        identity.addView(regionPlan);
+        titleRow.addView(identity, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        gapH(titleRow, 8);
+        titleRow.addView(pill(s.optString("status_label", statusLabel(status)), statusColor(status), statusBackground(status)));
+        c.addView(titleRow, matchWrap());
+        gap(c, 13);
+
+        LinearLayout endpoint = roundedBox(SOFT_BLUE, 14, 0, 0);
+        endpoint.setPadding(dp(13), dp(8), dp(13), dp(8));
+        endpoint.addView(infoRow("连接", blankDash(s.optString("public_ip", "")) + portSuffix(s.optInt("ssh_port", 0))));
+        endpoint.addView(thinDivider());
+        endpoint.addView(infoRow("配置", s.optInt("cpu", 0) + " vCPU · " + s.optInt("memory_mb", 0) + " MB · " + s.optInt("disk_gb", 0) + " GB"));
+        c.addView(endpoint, matchWrap());
         gap(c, 12);
 
         long used = s.optLong("traffic_used_bytes", 0);
         int quota = s.optInt("traffic_quota_gb", 0);
-        c.addView(infoRow("流量", bytes(used) + " / " + quota + " GB"));
-        ProgressBar traffic = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
-        traffic.setMax(1000);
-        traffic.setProgress(trafficProgress(used, quota));
-        traffic.setProgressTintList(ColorStateList.valueOf(BLUE));
-        traffic.setProgressBackgroundTintList(ColorStateList.valueOf(BORDER));
-        LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(4));
-        tlp.topMargin = dp(3);
-        tlp.bottomMargin = dp(8);
-        c.addView(traffic, tlp);
-        c.addView(infoRow("到期时间", s.isNull("expires_at") ? "长期有效" : cleanDate(s.optString("expires_at"))));
+        LinearLayout trafficTop = horizontalRow();
+        trafficTop.setGravity(Gravity.CENTER_VERTICAL);
+        trafficTop.addView(text("流量", 11, MUTED, true), new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        trafficTop.addView(text(bytes(used) + " / " + quota + " GB", 11, INK, true));
+        c.addView(trafficTop, matchWrap());
+        c.addView(capsuleTraffic(used, quota, s.optBoolean("traffic_throttled", false)), capsuleLp(7, 8, 9));
+        c.addView(infoRow("到期时间", s.isNull("expires_at") ? "长期有效" : dateOnly(s.optString("expires_at"))));
 
         if (showDetail) {
             gap(c, 8);
-            View div = thinDivider();
-            c.addView(div);
+            c.addView(thinDivider());
             TextView detail = text("查看详情  ›", 12, BLUE, true);
             detail.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
             detail.setPadding(dp(4), dp(10), dp(4), dp(8));
@@ -2100,8 +2225,7 @@ public class MainActivity extends Activity {
         }
 
         c.addView(thinDivider());
-        LinearLayout actions = powerActions(s);
-        c.addView(actions, matchWrap());
+        c.addView(powerActions(s), matchWrap());
         return c;
     }
 
@@ -2109,7 +2233,7 @@ public class MainActivity extends Activity {
         LinearLayout card = surfaceCard(18);
         card.setPadding(dp(16), dp(14), dp(16), dp(14));
         int serverId = s.optInt("id", 0);
-        String serverName = s.optString("name", "VPS");
+        String serverName = displayServerId(s);
         JSONArray ports = s.optJSONArray("ports");
         int count = ports == null ? 0 : ports.length();
         int limit = s.optInt("port_limit", 0);
@@ -2142,7 +2266,7 @@ public class MainActivity extends Activity {
 
         gap(card, 12);
         Button add = sheetButton("添加端口", BLUE, BLUE_SOFT, 0);
-        boolean canAdd = limit > 0 && count < limit && !"reinstalling".equals(s.optString("status"));
+        boolean canAdd = limit > 0 && count < limit && isManagementStatus(s.optString("status"));
         setActionEnabled(add, canAdd);
         add.setOnClickListener(v -> showAddPortSheet(serverId, serverName, count, limit));
         card.addView(add, matchWrap());
@@ -2324,7 +2448,7 @@ public class MainActivity extends Activity {
             return;
         }
         final int serverId = server.optInt("id", 0);
-        final String serverName = server.optString("name", "VPS");
+        final String serverName = displayServerId(server);
         managementActionInProgress = true;
         toast("正在读取可用系统镜像…");
         io.execute(() -> {
@@ -2553,13 +2677,13 @@ public class MainActivity extends Activity {
         actions.setGravity(Gravity.CENTER_VERTICAL);
         actions.setPadding(0, dp(3), 0, 0);
         int id = s.optInt("id", 0);
-        String name = s.optString("name", "VPS");
+        String name = displayServerId(s);
         String status = s.optString("status", "unknown");
         Button start = groupedActionButton("开机", BLUE);
         Button stop = groupedActionButton("关机", RED);
         Button reboot = groupedActionButton("重启", INK);
-        setActionEnabled(start, !"running".equals(status));
-        setActionEnabled(stop, !"stopped".equals(status));
+        setActionEnabled(start, "stopped".equals(status));
+        setActionEnabled(stop, "running".equals(status));
         setActionEnabled(reboot, "running".equals(status));
         start.setOnClickListener(v -> confirmAction(id, name, status, "start", "开机"));
         stop.setOnClickListener(v -> confirmAction(id, name, status, "stop", "关机"));
@@ -2676,9 +2800,11 @@ public class MainActivity extends Activity {
         gap(c, 7);
         LinearLayout meta = horizontalRow();
         meta.setGravity(Gravity.CENTER_VERTICAL);
-        meta.addView(pill(orderStatusLabel(o.optString("status")), orderStatusColor(o.optString("status")), orderStatusBg(o.optString("status"))));
+        String status = o.optString("status", "");
+        meta.addView(pill(o.optString("status_label", orderStatusLabel(status)), orderStatusColor(status), orderStatusBg(status)));
         gapH(meta, 8);
-        meta.addView(text(orderKindLabel(o.optString("kind")) + " · " + cleanDate(o.optString("created_at")), 11, MUTED, false));
+        String kind = o.optString("kind_label", orderKindLabel(o.optString("kind")));
+        meta.addView(text(kind + " · " + dateOnly(o.optString("created_at")), 11, MUTED, false));
         c.addView(meta, matchWrap());
         return c;
     }
@@ -2689,11 +2815,11 @@ public class MainActivity extends Activity {
         long delta = row.optLong("delta_cents", 0);
         LinearLayout top = horizontalRow();
         String note = row.optString("note", "");
-        if (note.isEmpty() || "null".equals(note)) note = ledgerKindLabel(row.optString("kind"));
+        if (note.isEmpty() || "null".equals(note)) note = row.optString("kind_label", ledgerKindLabel(row.optString("kind")));
         top.addView(text(note, 13, INK, true), new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
         top.addView(text((delta >= 0 ? "+¥" : "-¥") + money(Math.abs(delta)), 14, delta >= 0 ? GREEN : RED, true));
         c.addView(top, matchWrap());
-        TextView sub = text(cleanDate(row.optString("created_at")) + " · 余额 ¥" + money(row.optLong("balance_after_cents", 0)), 11, MUTED, false);
+        TextView sub = text(dateOnly(row.optString("created_at")) + " · 余额 ¥" + money(row.optLong("balance_after_cents", 0)), 11, MUTED, false);
         sub.setPadding(0, dp(6), 0, 0);
         c.addView(sub);
         return c;
@@ -2706,13 +2832,816 @@ public class MainActivity extends Activity {
         top.setGravity(Gravity.CENTER_VERTICAL);
         String chain = r.optString("chain", "").toUpperCase();
         top.addView(text(chain + " 充值", 14, INK, true), new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
-        top.addView(pill(rechargeStatusLabel(r.optString("status")), rechargeStatusColor(r.optString("status")), rechargeStatusBg(r.optString("status"))));
+        String status = r.optString("status", "");
+        top.addView(pill(r.optString("status_label", rechargeStatusLabel(status)), rechargeStatusColor(status), rechargeStatusBg(status)));
         c.addView(top, matchWrap());
-        TextView amount = text("¥" + money(r.optLong("requested_cny_cents", 0)) + " · " + usdt(r.optLong("expected_usdt_units", 0)) + " USDT", 12, INK, false);
+        String expected = r.optString("expected_usdt_text", "");
+        if (expected.isEmpty()) expected = usdt(r.optLong("expected_usdt_units", 0));
+        TextView amount = text("¥" + money(r.optLong("requested_cny_cents", 0)) + " · " + expected + " USDT", 12, INK, false);
         amount.setPadding(0, dp(7), 0, dp(4));
         c.addView(amount);
-        c.addView(text(cleanDate(r.optString("created_at")), 11, MUTED, false));
+        c.addView(text(dateOnly(r.optString("created_at")) + " · 点击查看详情", 11, MUTED, false));
+        c.setBackground(rippleRoundRect(CARD, 16, BORDER, RIPPLE));
         return c;
+    }
+
+    private LinearLayout trafficResetCard(JSONObject s) {
+        LinearLayout card = surfaceCard(18);
+        card.setPadding(dp(16), dp(14), dp(16), dp(14));
+        boolean available = s.optBoolean("traffic_reset_available", false);
+        long price = s.optLong("traffic_reset_price_cents", 0);
+        card.addView(infoRow("流量重置价格", price > 0 ? "¥" + money(price) : "不可用"));
+        String reason = s.optString("traffic_reset_reason", "").trim();
+        if (!reason.isEmpty()) {
+            TextView hint = text(reason, 11, available ? MUTED : AMBER, false);
+            hint.setPadding(0, dp(9), 0, dp(11));
+            card.addView(hint);
+        } else {
+            gap(card, 10);
+        }
+        Button reset = sheetButton(available ? "重置本周期流量" : "暂不可重置", Color.WHITE, available ? BLUE : MUTED, 0);
+        setActionEnabled(reset, available);
+        reset.setOnClickListener(v -> showTrafficResetSheet(s));
+        card.addView(reset, matchWrap());
+        return card;
+    }
+
+    private void showTrafficResetSheet(JSONObject s) {
+        if (!s.optBoolean("traffic_reset_available", false)) {
+            String reason = s.optString("traffic_reset_reason", "当前暂不可重置流量");
+            toast(reason.isEmpty() ? "当前暂不可重置流量" : reason);
+            return;
+        }
+        Dialog dialog = bottomDialog();
+        LinearLayout sheet = bottomSheetBase();
+        sheet.addView(text("确认重置流量", 22, INK, true));
+        TextView desc = text("该操作会立即扣除余额并开启新的流量周期。", 12, MUTED, false);
+        desc.setPadding(0, dp(5), 0, dp(15));
+        sheet.addView(desc);
+        LinearLayout box = roundedBox(SOFT, 14, BORDER, 1);
+        box.setPadding(dp(13), dp(7), dp(13), dp(7));
+        box.addView(infoRow("服务器", displayServerId(s)));
+        box.addView(thinDivider());
+        box.addView(infoRow("重置费用", "¥" + money(s.optLong("traffic_reset_price_cents", 0))));
+        box.addView(thinDivider());
+        box.addView(infoRow("当前已用", bytes(s.optLong("traffic_used_bytes", 0))));
+        sheet.addView(box, matchWrap());
+        gap(sheet, 18);
+        LinearLayout buttons = horizontalRow();
+        Button cancel = sheetButton("取消", INK, SOFT, BORDER);
+        Button confirm = sheetButton("确认重置", Color.WHITE, BLUE, 0);
+        buttons.addView(cancel, weighted());
+        gapH(buttons, 10);
+        buttons.addView(confirm, weighted());
+        sheet.addView(buttons, matchWrap());
+        cancel.setOnClickListener(v -> dialog.dismiss());
+        confirm.setOnClickListener(v -> {
+            dialog.dismiss();
+            runTrafficReset(s.optInt("id", 0));
+        });
+        showBottomDialog(dialog, sheet);
+    }
+
+    private void runTrafficReset(int serverId) {
+        if (managementActionInProgress) return;
+        managementActionInProgress = true;
+        toast("正在重置流量…");
+        io.execute(() -> {
+            try {
+                JSONObject out = ApiClient.request(baseUrl, "/api/v1/servers/" + serverId + "/traffic/reset", "POST", token, new JSONObject());
+                main.post(() -> {
+                    managementActionInProgress = false;
+                    cachedHome = null;
+                    cachedServices = null;
+                    cachedBilling = null;
+                    cachedMe = null;
+                    cachedServerDetails.remove(serverId);
+                    String warning = out.optString("provider_warning", "");
+                    toast(warning.isEmpty() ? "流量已重置" : "流量已重置，带宽恢复正在后台重试");
+                    showServerDetail(serverId);
+                });
+            } catch (Exception e) {
+                main.post(() -> {
+                    managementActionInProgress = false;
+                    if (!handleUnauthorized(e)) toast("重置流量失败：" + message(e));
+                });
+            }
+        });
+    }
+
+    private void showDeleteServerSheet(JSONObject s) {
+        String displayId = displayServerId(s);
+        Dialog dialog = bottomDialog();
+        LinearLayout sheet = bottomSheetBase();
+        sheet.addView(text("删除服务器", 22, RED, true));
+        TextView desc = text("删除后实例与系统盘将永久移除，操作无法撤销。", 12, MUTED, false);
+        desc.setPadding(0, dp(5), 0, dp(14));
+        sheet.addView(desc);
+        LinearLayout warning = roundedBox(RED_SOFT, 14, 0, 0);
+        warning.setPadding(dp(13), dp(11), dp(13), dp(11));
+        warning.addView(text("请输入稳定编号 “" + displayId + "” 确认删除。", 12, RED, true));
+        sheet.addView(warning, matchWrap());
+        gap(sheet, 12);
+        EditText confirmInput = input(displayId, InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS);
+        sheet.addView(confirmInput, matchWrap());
+        gap(sheet, 18);
+        LinearLayout buttons = horizontalRow();
+        Button cancel = sheetButton("取消", INK, SOFT, BORDER);
+        Button confirm = sheetButton("永久删除", Color.WHITE, RED, 0);
+        buttons.addView(cancel, weighted());
+        gapH(buttons, 10);
+        buttons.addView(confirm, weighted());
+        sheet.addView(buttons, matchWrap());
+        cancel.setOnClickListener(v -> dialog.dismiss());
+        confirm.setOnClickListener(v -> {
+            String typed = confirmInput.getText().toString().trim();
+            if (!displayId.equalsIgnoreCase(typed)) {
+                toast("请输入完整稳定编号 “" + displayId + "”");
+                return;
+            }
+            dialog.dismiss();
+            runDeleteServer(s.optInt("id", 0), displayId);
+        });
+        showBottomDialog(dialog, sheet);
+    }
+
+    private void runDeleteServer(int serverId, String displayId) {
+        if (managementActionInProgress) return;
+        managementActionInProgress = true;
+        io.execute(() -> {
+            try {
+                JSONObject body = new JSONObject().put("confirm_name", displayId);
+                JSONObject out = ApiClient.request(baseUrl, "/api/v1/servers/" + serverId + "/delete", "POST", token, body);
+                main.post(() -> {
+                    managementActionInProgress = false;
+                    cachedHome = null;
+                    cachedServices = null;
+                    cachedServerDetails.remove(serverId);
+                    toast(out.optBoolean("replayed", false) ? "删除任务已在执行" : "删除任务已提交");
+                    selectTab(TAB_SERVICES);
+                });
+            } catch (Exception e) {
+                main.post(() -> {
+                    managementActionInProgress = false;
+                    if (!handleUnauthorized(e)) toast("删除失败：" + message(e));
+                });
+            }
+        });
+    }
+
+    private void showRechargeStartSheet() {
+        Dialog dialog = bottomDialog();
+        LinearLayout loading = bottomSheetBase();
+        loading.addView(text("USDT 充值", 22, INK, true));
+        TextView desc = text("正在读取充值通道…", 12, MUTED, false);
+        desc.setPadding(0, dp(5), 0, dp(14));
+        loading.addView(desc);
+        ProgressBar busy = new ProgressBar(this);
+        busy.setIndeterminateTintList(ColorStateList.valueOf(BLUE));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(30), dp(30));
+        lp.gravity = Gravity.CENTER_HORIZONTAL;
+        loading.addView(busy, lp);
+        showBottomDialog(dialog, loading);
+        io.execute(() -> {
+            try {
+                JSONObject cfg = ApiClient.request(baseUrl, "/api/v1/recharge/config", "GET", token, null);
+                main.post(() -> {
+                    if (!dialog.isShowing()) return;
+                    if (!cfg.optBoolean("enabled", false)) {
+                        dialog.dismiss();
+                        toast("当前未开启充值功能");
+                        return;
+                    }
+                    swapBottomDialogContent(dialog, rechargeStartContent(dialog, cfg), true);
+                });
+            } catch (Exception e) {
+                main.post(() -> {
+                    dialog.dismiss();
+                    if (!handleUnauthorized(e)) toast("读取充值配置失败：" + message(e));
+                });
+            }
+        });
+    }
+
+    private LinearLayout rechargeStartContent(Dialog dialog, JSONObject cfg) {
+        LinearLayout sheet = bottomSheetBase();
+        sheet.addView(text("USDT 充值", 22, INK, true));
+        TextView desc = text("输入人民币金额，XNAT 会锁定当前汇率并生成精确 USDT 订单。", 12, MUTED, false);
+        desc.setPadding(0, dp(5), 0, dp(14));
+        sheet.addView(desc);
+
+        LinearLayout rate = roundedBox(SOFT_BLUE, 14, 0, 0);
+        rate.setPadding(dp(13), dp(7), dp(13), dp(7));
+        rate.addView(infoRow("当前汇率", "1 USDT ≈ ¥" + cfg.optString("rate_text", "-")));
+        rate.addView(thinDivider());
+        rate.addView(infoRow("充值范围", "¥" + money(cfg.optLong("min_cny_cents", 0)) + " ～ ¥" + money(cfg.optLong("max_cny_cents", 0))));
+        rate.addView(thinDivider());
+        rate.addView(infoRow("订单有效期", cfg.optInt("expire_minutes", 30) + " 分钟"));
+        sheet.addView(rate, matchWrap());
+        gap(sheet, 14);
+
+        sheet.addView(text("充值金额（CNY）", 12, MUTED, true));
+        gap(sheet, 7);
+        EditText amount = input("例如 50.00", InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
+        sheet.addView(amount, matchWrap());
+        gap(sheet, 14);
+        sheet.addView(text("选择网络", 12, MUTED, true));
+        gap(sheet, 8);
+
+        JSONArray chains = cfg.optJSONArray("chains");
+        final String[] selected = {""};
+        LinearLayout options = column();
+        if (chains != null) {
+            for (int i = 0; i < chains.length(); i++) {
+                JSONObject chain = chains.optJSONObject(i);
+                if (chain == null || !chain.optBoolean("enabled", false)) continue;
+                String id = chain.optString("id", "");
+                if (selected[0].isEmpty()) selected[0] = id;
+                LinearLayout option = horizontalRow();
+                option.setGravity(Gravity.CENTER_VERTICAL);
+                option.setPadding(dp(13), dp(11), dp(13), dp(11));
+                option.setTag("chain-" + id);
+                LinearLayout copy = column();
+                copy.addView(text(chain.optString("name", id), 13, INK, true));
+                copy.addView(text(chain.optString("mode_label", ""), 11, MUTED, false));
+                option.addView(copy, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+                TextView mark = text(id.equals(selected[0]) ? "✓" : "", 15, BLUE, true);
+                mark.setTag("mark");
+                option.addView(mark);
+                option.setBackground(rippleRoundRect(id.equals(selected[0]) ? BLUE_SOFT : SOFT, 15, id.equals(selected[0]) ? BLUE : 0, RIPPLE));
+                option.setOnClickListener(v -> {
+                    selected[0] = id;
+                    for (int x = 0; x < options.getChildCount(); x++) {
+                        View child = options.getChildAt(x);
+                        if (!(child instanceof LinearLayout)) continue;
+                        boolean active = ("chain-" + selected[0]).equals(String.valueOf(child.getTag()));
+                        child.setBackground(rippleRoundRect(active ? BLUE_SOFT : SOFT, 15, active ? BLUE : 0, RIPPLE));
+                        TextView m = child.findViewWithTag("mark");
+                        if (m != null) m.setText(active ? "✓" : "");
+                    }
+                });
+                options.addView(option, matchWrap());
+                gap(options, 8);
+            }
+        }
+        if (selected[0].isEmpty()) {
+            sheet.addView(emptyCard("暂无可用充值网络", "请在 Panel 后台启用 TRON 或 Polygon 充值通道。"), matchWrap());
+            return sheet;
+        }
+        sheet.addView(options, matchWrap());
+        gap(sheet, 18);
+        LinearLayout buttons = horizontalRow();
+        Button cancel = sheetButton("取消", INK, SOFT, BORDER);
+        Button create = sheetButton("创建充值订单", Color.WHITE, BLUE, 0);
+        buttons.addView(cancel, weighted());
+        gapH(buttons, 10);
+        buttons.addView(create, weighted());
+        sheet.addView(buttons, matchWrap());
+        cancel.setOnClickListener(v -> dialog.dismiss());
+        create.setOnClickListener(v -> {
+            String value = amount.getText().toString().trim();
+            if (value.isEmpty()) { toast("请输入充值金额"); return; }
+            runCreateRecharge(dialog, create, selected[0], value);
+        });
+        return sheet;
+    }
+
+    private void runCreateRecharge(Dialog dialog, Button button, String chain, String amount) {
+        if (managementActionInProgress) return;
+        managementActionInProgress = true;
+        button.setEnabled(false);
+        button.setText("正在创建…");
+        io.execute(() -> {
+            try {
+                JSONObject body = new JSONObject().put("chain", chain).put("amount", amount);
+                JSONObject out = ApiClient.request(baseUrl, "/api/v1/recharges", "POST", token, body);
+                JSONObject recharge = out.optJSONObject("recharge");
+                if (recharge == null) throw new Exception("服务器未返回充值订单");
+                main.post(() -> {
+                    managementActionInProgress = false;
+                    dialog.dismiss();
+                    cachedBilling = null;
+                    showRechargeOrderSheet(recharge);
+                });
+            } catch (Exception e) {
+                main.post(() -> {
+                    managementActionInProgress = false;
+                    button.setEnabled(true);
+                    button.setText("重新创建");
+                    if (!handleUnauthorized(e)) toast("创建充值订单失败：" + message(e));
+                });
+            }
+        });
+    }
+
+    private void loadRechargeOrder(int rechargeId) {
+        if (rechargeId <= 0) return;
+        io.execute(() -> {
+            try {
+                JSONObject recharge = ApiClient.request(baseUrl, "/api/v1/recharges/" + rechargeId, "GET", token, null);
+                main.post(() -> showRechargeOrderSheet(recharge));
+            } catch (Exception e) {
+                main.post(() -> { if (!handleUnauthorized(e)) toast("读取充值订单失败：" + message(e)); });
+            }
+        });
+    }
+
+    private void showRechargeOrderSheet(JSONObject recharge) {
+        Dialog dialog = bottomDialog();
+        showBottomDialog(dialog, rechargeOrderContent(dialog, recharge));
+        scheduleRechargePoll(dialog, recharge.optInt("id", 0), recharge.optString("status", ""));
+    }
+
+    private LinearLayout rechargeOrderContent(Dialog dialog, JSONObject r) {
+        LinearLayout sheet = bottomSheetBase();
+        String status = r.optString("status", "pending");
+        LinearLayout heading = horizontalRow();
+        heading.setGravity(Gravity.CENTER_VERTICAL);
+        heading.addView(text("USDT 充值订单", 22, INK, true), new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        heading.addView(pill(r.optString("status_label", rechargeStatusLabel(status)), rechargeStatusColor(status), rechargeStatusBg(status)));
+        sheet.addView(heading, matchWrap());
+        TextView idText = text("订单 #" + r.optInt("id", 0) + " · " + r.optString("chain_label", r.optString("chain", "").toUpperCase()), 11, MUTED, false);
+        idText.setPadding(0, dp(5), 0, dp(14));
+        sheet.addView(idText);
+
+        LinearLayout amountBox = roundedBox(SOFT_BLUE, 16, 0, 0);
+        amountBox.setPadding(dp(14), dp(10), dp(14), dp(10));
+        amountBox.addView(infoRow("充值金额", "¥" + money(r.optLong("requested_cny_cents", 0))));
+        amountBox.addView(thinDivider());
+        amountBox.addView(infoRow("应付 USDT", r.optString("expected_usdt_text", usdt(r.optLong("expected_usdt_units", 0))) + " USDT"));
+        amountBox.addView(thinDivider());
+        amountBox.addView(infoRow("锁定汇率", "1 USDT ≈ ¥" + r.optString("rate_text", "-")));
+        if (r.optInt("remaining_seconds", 0) > 0) {
+            amountBox.addView(thinDivider());
+            amountBox.addView(infoRow("剩余时间", formatRemaining(r.optInt("remaining_seconds", 0))));
+        }
+        sheet.addView(amountBox, matchWrap());
+
+        String address = r.optString("deposit_address", "").trim();
+        if (!address.isEmpty() && ("pending".equals(status) || "manual".equals(status) || "detected".equals(status))) {
+            gap(sheet, 14);
+            ImageView qr = new ImageView(this);
+            Bitmap qrBitmap = qrBitmap(address, 230);
+            if (qrBitmap != null) qr.setImageBitmap(qrBitmap);
+            qr.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+            qr.setBackground(roundRect(Color.WHITE, dp(18), BORDER, 1));
+            qr.setPadding(dp(10), dp(10), dp(10), dp(10));
+            LinearLayout.LayoutParams qlp = new LinearLayout.LayoutParams(dp(230), dp(230));
+            qlp.gravity = Gravity.CENTER_HORIZONTAL;
+            sheet.addView(qr, qlp);
+            gap(sheet, 10);
+            TextView addressView = text(address, 12, INK, true);
+            addressView.setGravity(Gravity.CENTER_HORIZONTAL);
+            addressView.setTextIsSelectable(true);
+            addressView.setPadding(dp(8), 0, dp(8), dp(9));
+            sheet.addView(addressView, matchWrap());
+            Button copy = sheetButton("复制收款地址", BLUE, BLUE_SOFT, 0);
+            copy.setOnClickListener(v -> copyText("USDT 收款地址", address));
+            sheet.addView(copy, matchWrap());
+            String contract = r.optString("token_contract", "").trim();
+            if (!contract.isEmpty()) {
+                gap(sheet, 8);
+                TextView contractView = text("Token 合约  " + contract, 10, MUTED, false);
+                contractView.setTextIsSelectable(true);
+                contractView.setGravity(Gravity.CENTER_HORIZONTAL);
+                contractView.setOnClickListener(v -> copyText("USDT Token 合约", contract));
+                sheet.addView(contractView, matchWrap());
+            }
+        }
+
+        if (r.optBoolean("needs_txid", false)) {
+            gap(sheet, 14);
+            EditText txid = input("输入 64 位交易哈希 TxHash", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+            sheet.addView(txid, matchWrap());
+            gap(sheet, 8);
+            Button submit = sheetButton("提交 TxHash", Color.WHITE, BLUE, 0);
+            submit.setOnClickListener(v -> {
+                String value = txid.getText().toString().trim();
+                if (value.isEmpty()) { toast("请输入交易哈希"); return; }
+                runSubmitRechargeTxid(dialog, r.optInt("id", 0), value);
+            });
+            sheet.addView(submit, matchWrap());
+        }
+
+        gap(sheet, 16);
+        LinearLayout buttons = horizontalRow();
+        if (r.optBoolean("can_cancel", false)) {
+            Button cancel = sheetButton("取消订单", RED, RED_SOFT, 0);
+            cancel.setOnClickListener(v -> runCancelRecharge(dialog, r.optInt("id", 0)));
+            buttons.addView(cancel, weighted());
+            gapH(buttons, 10);
+        }
+        Button refresh = sheetButton("刷新状态", Color.WHITE, BLUE, 0);
+        refresh.setOnClickListener(v -> refreshRechargeDialog(dialog, r.optInt("id", 0), true));
+        buttons.addView(refresh, weighted());
+        sheet.addView(buttons, matchWrap());
+        return sheet;
+    }
+
+    private void scheduleRechargePoll(Dialog dialog, int rechargeId, String status) {
+        if (rechargeId <= 0 || !("pending".equals(status) || "manual".equals(status) || "detected".equals(status))) return;
+        main.postDelayed(() -> {
+            if (dialog.isShowing()) refreshRechargeDialog(dialog, rechargeId, false);
+        }, 5000L);
+    }
+
+    private void refreshRechargeDialog(Dialog dialog, int rechargeId, boolean userInitiated) {
+        io.execute(() -> {
+            try {
+                JSONObject fresh = ApiClient.request(baseUrl, "/api/v1/recharges/" + rechargeId, "GET", token, null);
+                main.post(() -> {
+                    if (!dialog.isShowing()) return;
+                    swapBottomDialogContent(dialog, rechargeOrderContent(dialog, fresh), false);
+                    if ("paid".equals(fresh.optString("status")) || "completed".equals(fresh.optString("status"))) {
+                        cachedBilling = null;
+                        cachedMe = null;
+                        cachedHome = null;
+                        if (userInitiated) toast("充值已到账");
+                    } else {
+                        if (userInitiated) toast("状态已刷新");
+                        scheduleRechargePoll(dialog, rechargeId, fresh.optString("status", ""));
+                    }
+                });
+            } catch (Exception e) {
+                main.post(() -> { if (userInitiated && !handleUnauthorized(e)) toast("刷新失败：" + message(e)); });
+            }
+        });
+    }
+
+    private void runCancelRecharge(Dialog dialog, int rechargeId) {
+        io.execute(() -> {
+            try {
+                JSONObject out = ApiClient.request(baseUrl, "/api/v1/recharges/" + rechargeId + "/cancel", "POST", token, new JSONObject());
+                JSONObject fresh = out.optJSONObject("recharge");
+                main.post(() -> {
+                    cachedBilling = null;
+                    if (!dialog.isShowing()) return;
+                    if (fresh != null) swapBottomDialogContent(dialog, rechargeOrderContent(dialog, fresh), true);
+                    toast(out.optString("message", "订单已取消"));
+                });
+            } catch (Exception e) {
+                main.post(() -> { if (!handleUnauthorized(e)) toast("取消失败：" + message(e)); });
+            }
+        });
+    }
+
+    private void runSubmitRechargeTxid(Dialog dialog, int rechargeId, String txHash) {
+        io.execute(() -> {
+            try {
+                JSONObject body = new JSONObject().put("tx_hash", txHash);
+                JSONObject out = ApiClient.request(baseUrl, "/api/v1/recharges/" + rechargeId + "/txid", "POST", token, body);
+                JSONObject fresh = out.optJSONObject("recharge");
+                main.post(() -> {
+                    cachedBilling = null;
+                    if (dialog.isShowing() && fresh != null) swapBottomDialogContent(dialog, rechargeOrderContent(dialog, fresh), true);
+                    toast("交易哈希已提交");
+                });
+            } catch (Exception e) {
+                main.post(() -> { if (!handleUnauthorized(e)) toast("提交 TxHash 失败：" + message(e)); });
+            }
+        });
+    }
+
+    private void showBillingMonthSheet(JSONObject data) {
+        Dialog dialog = bottomDialog();
+        LinearLayout sheet = bottomSheetBase();
+        sheet.addView(text("选择账务月份", 22, INK, true));
+        TextView desc = text("按自然月查看订单、余额流水与充值记录。", 12, MUTED, false);
+        desc.setPadding(0, dp(5), 0, dp(14));
+        sheet.addView(desc);
+        JSONArray months = data.optJSONArray("available_months");
+        boolean currentIncluded = false;
+        if (months != null) {
+            for (int i = 0; i < months.length(); i++) if (currentMonth().equals(months.optString(i))) currentIncluded = true;
+        }
+        if (!currentIncluded) addBillingMonthButton(sheet, dialog, currentMonth());
+        if (months != null) {
+            for (int i = 0; i < months.length(); i++) {
+                String month = months.optString(i, "");
+                if (!month.isEmpty()) addBillingMonthButton(sheet, dialog, month);
+            }
+        }
+        if ((months == null || months.length() == 0) && currentIncluded) {
+            sheet.addView(text("暂无历史账务月份", 12, MUTED, false));
+        }
+        showBottomDialog(dialog, sheet);
+    }
+
+    private void addBillingMonthButton(LinearLayout sheet, Dialog dialog, String month) {
+        Button b = sheetButton((month.equals(billingMonth) ? "✓  " : "") + formatMonth(month), month.equals(billingMonth) ? BLUE : INK, month.equals(billingMonth) ? BLUE_SOFT : SOFT, month.equals(billingMonth) ? BLUE : BORDER);
+        b.setOnClickListener(v -> {
+            billingMonth = month;
+            cachedBilling = null;
+            dialog.dismiss();
+            reloadCurrentTab();
+        });
+        sheet.addView(b, matchWrap());
+        gap(sheet, 8);
+    }
+
+    private void showStartupOverlay() {
+        Dialog dialog = new Dialog(this);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        LinearLayout wrap = column();
+        wrap.setGravity(Gravity.CENTER);
+        wrap.setBackgroundColor(BG);
+        TextView mark = text("X", 30, Color.WHITE, true);
+        mark.setGravity(Gravity.CENTER);
+        mark.setBackground(gradientRoundRect(NAVY, NAVY_2, 22));
+        wrap.addView(mark, new LinearLayout.LayoutParams(dp(76), dp(76)));
+        gap(wrap, 16);
+        TextView title = text("XNAT", 30, INK, true);
+        title.setGravity(Gravity.CENTER);
+        wrap.addView(title, matchWrap());
+        TextView sub = text("安全连接 · 正在准备服务", 11, MUTED, false);
+        sub.setGravity(Gravity.CENTER);
+        sub.setPadding(0, dp(6), 0, 0);
+        wrap.addView(sub, matchWrap());
+        CapsuleProgressView line = new CapsuleProgressView(this);
+        line.setColors(BORDER, BLUE);
+        line.setProgressFraction(0.72f);
+        LinearLayout.LayoutParams llp = new LinearLayout.LayoutParams(dp(116), dp(4));
+        llp.gravity = Gravity.CENTER_HORIZONTAL;
+        llp.topMargin = dp(18);
+        wrap.addView(line, llp);
+        dialog.setContentView(wrap);
+        Window w = dialog.getWindow();
+        if (w != null) {
+            w.setBackgroundDrawable(new ColorDrawable(BG));
+            w.setLayout(WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT);
+            w.setDimAmount(0f);
+        }
+        dialog.setCancelable(false);
+        dialog.show();
+        if (w != null) w.setLayout(WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT);
+        mark.setScaleX(0.92f);
+        mark.setScaleY(0.92f);
+        mark.setAlpha(0.45f);
+        mark.animate().scaleX(1f).scaleY(1f).alpha(1f).setDuration(420L).setInterpolator(motionEnter).start();
+        title.setAlpha(0f);
+        title.setTranslationY(dp(6));
+        title.animate().alpha(1f).translationY(0).setStartDelay(80L).setDuration(360L).setInterpolator(motionEnter).start();
+        main.postDelayed(() -> {
+            if (!dialog.isShowing()) return;
+            wrap.animate().alpha(0f).translationY(-dp(6)).setDuration(220L).setInterpolator(motionStandard).withEndAction(dialog::dismiss).start();
+        }, 700L);
+    }
+
+    private void checkForUpdates(boolean manual) {
+        if (updateCheckInProgress) {
+            if (manual) toast("正在检查更新…");
+            return;
+        }
+        long now = System.currentTimeMillis();
+        long last = prefs.getLong("last_update_check_at", 0L);
+        if (!manual && now - last < UPDATE_CHECK_INTERVAL_MS) return;
+        updateCheckInProgress = true;
+        io.execute(() -> {
+            try {
+                GitHubUpdateManager.UpdateInfo info = GitHubUpdateManager.fetchLatest();
+                boolean newer = GitHubUpdateManager.isNewerThanCurrent(info) || GitHubUpdateManager.sameCoreStableUpgrade(info);
+                prefs.edit().putLong("last_update_check_at", System.currentTimeMillis()).apply();
+                main.post(() -> {
+                    updateCheckInProgress = false;
+                    if (newer) showUpdateSheet(info);
+                    else if (manual) toast("当前已是最新版本 v" + BuildConfig.VERSION_NAME);
+                });
+            } catch (Exception e) {
+                main.post(() -> {
+                    updateCheckInProgress = false;
+                    if (manual) toast("检查更新失败：" + message(e));
+                });
+            }
+        });
+    }
+
+    private void showUpdateSheet(GitHubUpdateManager.UpdateInfo info) {
+        Dialog dialog = bottomDialog();
+        LinearLayout sheet = bottomSheetBase();
+        LinearLayout top = horizontalRow();
+        top.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout copy = column();
+        copy.addView(text("发现新版本", 22, INK, true));
+        copy.addView(text("XNAT Android " + info.tagName, 12, BLUE, true));
+        top.addView(copy, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        top.addView(pill("可更新", GREEN, GREEN_SOFT));
+        sheet.addView(top, matchWrap());
+        gap(sheet, 14);
+        LinearLayout versions = roundedBox(SOFT, 14, BORDER, 1);
+        versions.setPadding(dp(13), dp(7), dp(13), dp(7));
+        versions.addView(infoRow("当前版本", "v" + BuildConfig.VERSION_NAME));
+        versions.addView(thinDivider());
+        versions.addView(infoRow("最新版本", info.tagName));
+        sheet.addView(versions, matchWrap());
+        String notes = cleanReleaseNotes(info.body);
+        if (!notes.isEmpty()) {
+            gap(sheet, 14);
+            sheet.addView(text("更新内容", 12, MUTED, true));
+            gap(sheet, 7);
+            TextView note = text(notes, 12, INK, false);
+            note.setBackground(roundRect(SOFT_BLUE, dp(14), 0, 0));
+            note.setPadding(dp(13), dp(11), dp(13), dp(11));
+            sheet.addView(note, matchWrap());
+        }
+        gap(sheet, 18);
+        LinearLayout buttons = horizontalRow();
+        Button later = sheetButton("稍后更新", INK, SOFT, BORDER);
+        Button update = sheetButton("立即更新", Color.WHITE, BLUE, 0);
+        buttons.addView(later, weighted());
+        gapH(buttons, 10);
+        buttons.addView(update, weighted());
+        sheet.addView(buttons, matchWrap());
+        later.setOnClickListener(v -> dialog.dismiss());
+        update.setOnClickListener(v -> { dialog.dismiss(); downloadUpdate(info); });
+        showBottomDialog(dialog, sheet);
+    }
+
+    private void downloadUpdate(GitHubUpdateManager.UpdateInfo info) {
+        Dialog dialog = bottomDialog();
+        LinearLayout sheet = bottomSheetBase();
+        sheet.addView(text("正在下载更新", 22, INK, true));
+        TextView status = text(info.apkName, 12, MUTED, false);
+        status.setPadding(0, dp(5), 0, dp(14));
+        sheet.addView(status);
+        CapsuleProgressView progress = new CapsuleProgressView(this);
+        progress.setColors(BORDER, BLUE);
+        sheet.addView(progress, capsuleLp(8, 0, 12));
+        TextView detail = text("准备下载…", 11, MUTED, false);
+        detail.setGravity(Gravity.CENTER_HORIZONTAL);
+        sheet.addView(detail, matchWrap());
+        showBottomDialog(dialog, sheet);
+        io.execute(() -> {
+            try {
+                File apk = GitHubUpdateManager.downloadAndVerify(this, info, (done, total) -> main.post(() -> {
+                    if (!dialog.isShowing()) return;
+                    float fraction = total > 0 ? Math.min(1f, done / (float) total) : 0f;
+                    progress.setProgressFraction(fraction);
+                    detail.setText(total > 0 ? ((int) (fraction * 100)) + "% · 下载后自动校验 SHA-256" : bytes(done) + " · 下载中");
+                }));
+                main.post(() -> {
+                    if (dialog.isShowing()) dialog.dismiss();
+                    toast("APK 校验通过，准备安装");
+                    installDownloadedApk(apk);
+                });
+            } catch (Exception e) {
+                main.post(() -> {
+                    if (dialog.isShowing()) dialog.dismiss();
+                    toast("更新失败：" + message(e));
+                });
+            }
+        });
+    }
+
+    private void installDownloadedApk(File apk) {
+        if (apk == null || !apk.exists()) { toast("更新 APK 不存在"); return; }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !getPackageManager().canRequestPackageInstalls()) {
+            pendingInstallPath = apk.getAbsolutePath();
+            prefs.edit().putString("pending_update_apk", pendingInstallPath).apply();
+            try {
+                Intent settings = new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:" + getPackageName()));
+                startActivity(settings);
+                toast("请允许 XNAT 安装未知应用，返回后将继续安装");
+            } catch (Exception e) {
+                toast("请在系统设置中允许 XNAT 安装应用");
+            }
+            return;
+        }
+        try {
+            Uri uri = FileProvider.getUriForFile(this, getPackageName() + ".fileprovider", apk);
+            Intent intent = new Intent(Intent.ACTION_VIEW);
+            intent.setDataAndType(uri, "application/vnd.android.package-archive");
+            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
+            startActivity(intent);
+            prefs.edit().remove("pending_update_apk").apply();
+            pendingInstallPath = "";
+        } catch (Exception e) {
+            toast("无法启动系统安装器：" + message(e));
+        }
+    }
+
+    private String cleanReleaseNotes(String raw) {
+        if (raw == null) return "";
+        String text = raw.replace("\r", "").replaceAll("(?m)^#{1,6}\\s*", "").replace("**", "").replace("`", "").trim();
+        String[] lines = text.split("\n");
+        StringBuilder out = new StringBuilder();
+        int kept = 0;
+        for (String line : lines) {
+            String v = line.trim();
+            if (v.isEmpty()) continue;
+            if (out.length() > 0) out.append('\n');
+            out.append(v);
+            kept++;
+            if (kept >= 7 || out.length() > 620) break;
+        }
+        return out.toString();
+    }
+
+    private Bitmap qrBitmap(String value, int sizeDp) {
+        try {
+            int size = dp(sizeDp);
+            BitMatrix matrix = new MultiFormatWriter().encode(value, BarcodeFormat.QR_CODE, size, size);
+            Bitmap bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
+            for (int y = 0; y < size; y++) {
+                for (int x = 0; x < size; x++) bitmap.setPixel(x, y, matrix.get(x, y) ? Color.BLACK : Color.WHITE);
+            }
+            return bitmap;
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private void copyText(String label, String value) {
+        ClipboardManager clipboard = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+        if (clipboard != null) clipboard.setPrimaryClip(ClipData.newPlainText(label, value));
+        toast("已复制");
+    }
+
+    private ImageView flagView(String countryCode) {
+        ImageView view = new ImageView(this);
+        String code = countryCode == null ? "" : countryCode.trim().toLowerCase();
+        int res = getResources().getIdentifier("flag_" + code, "drawable", getPackageName());
+        if (res != 0) view.setImageResource(res);
+        view.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        view.setBackground(roundRect(SOFT, dp(7), BORDER, 1));
+        view.setClipToOutline(true);
+        view.setOutlineProvider(new ViewOutlineProvider() {
+            @Override public void getOutline(View v, Outline outline) {
+                outline.setRoundRect(0, 0, v.getWidth(), v.getHeight(), dp(7));
+            }
+        });
+        return view;
+    }
+
+    private CapsuleProgressView capsuleTraffic(long used, int quotaGb, boolean throttled) {
+        CapsuleProgressView view = new CapsuleProgressView(this);
+        view.setColors(BORDER, throttled ? AMBER : BLUE);
+        view.setProgressFraction(trafficProgress(used, quotaGb) / 1000f);
+        return view;
+    }
+
+    private LinearLayout.LayoutParams capsuleLp(int heightDp, int topDp, int bottomDp) {
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(heightDp));
+        lp.topMargin = dp(topDp);
+        lp.bottomMargin = dp(bottomDp);
+        return lp;
+    }
+
+    private String displayServerId(JSONObject s) {
+        String id = s.optString("display_id", "").trim();
+        return id.isEmpty() ? s.optString("name", "VPS") : id;
+    }
+
+    private String serverRegionPlan(JSONObject s) {
+        String region = s.optString("region", "").trim();
+        if (region.isEmpty()) region = s.optString("country_name", "").trim();
+        String plan = s.optString("plan_name", "").trim();
+        if (region.isEmpty()) return plan.isEmpty() ? "XNAT 服务" : plan;
+        if (plan.isEmpty()) return region;
+        return region + " · " + plan;
+    }
+
+    private String osShort(String value) {
+        if (value == null) return "";
+        String v = value.trim();
+        if (v.isEmpty() || "null".equals(v)) return "";
+        String[] parts = v.split("\\s+");
+        if (parts.length <= 2) return v;
+        return parts[0] + " " + parts[1];
+    }
+
+    private boolean isManagementStatus(String status) {
+        return "running".equals(status) || "stopped".equals(status);
+    }
+
+    private String currentMonth() {
+        Calendar c = Calendar.getInstance();
+        return String.format(java.util.Locale.US, "%04d-%02d", c.get(Calendar.YEAR), c.get(Calendar.MONTH) + 1);
+    }
+
+    private String formatMonth(String month) {
+        if (month == null || month.length() < 7) return month == null ? "" : month;
+        try { return month.substring(0, 4) + " 年 " + Integer.parseInt(month.substring(5, 7)) + " 月"; }
+        catch (Exception ignored) { return month; }
+    }
+
+    private String dateOnly(String iso) {
+        if (iso == null || iso.isEmpty() || "null".equals(iso)) return "-";
+        String cleaned = iso.replace("T", " ").replace("Z", "");
+        return cleaned.substring(0, Math.min(10, cleaned.length()));
+    }
+
+    private String dateRange(String start, String end) {
+        String a = dateOnly(start);
+        String b = dateOnly(end);
+        if ("-".equals(a) && "-".equals(b)) return "-";
+        return a + " → " + b;
+    }
+
+    private String formatRemaining(int seconds) {
+        int s = Math.max(0, seconds);
+        int m = s / 60;
+        int r = s % 60;
+        return String.format(java.util.Locale.US, "%02d:%02d", m, r);
     }
 
     private void confirmLogoutSheet() {
@@ -3051,8 +3980,8 @@ public class MainActivity extends Activity {
 
     private int statusBackground(String s) {
         if ("running".equals(s)) return GREEN_SOFT;
-        if ("stopped".equals(s)) return SOFT;
-        if ("provisioning".equals(s) || "reinstalling".equals(s)) return BLUE_SOFT;
+        if ("stopped".equals(s) || "deleted".equals(s)) return SOFT;
+        if ("provisioning".equals(s) || "reinstalling".equals(s) || "deleting".equals(s)) return BLUE_SOFT;
         return RED_SOFT;
     }
 
@@ -3951,13 +4880,15 @@ public class MainActivity extends Activity {
         if ("provisioning".equals(s)) return "开通中";
         if ("reinstalling".equals(s)) return "重装中";
         if ("deleting".equals(s)) return "删除中";
+        if ("provision_failed".equals(s)) return "开通失败";
+        if ("deleted".equals(s)) return "已删除";
         return s == null || s.isEmpty() ? "未知" : s;
     }
 
     private int statusColor(String s) {
         if ("running".equals(s)) return GREEN;
-        if ("stopped".equals(s)) return MUTED;
-        if ("provisioning".equals(s) || "reinstalling".equals(s)) return BLUE;
+        if ("stopped".equals(s) || "deleted".equals(s)) return MUTED;
+        if ("provisioning".equals(s) || "reinstalling".equals(s) || "deleting".equals(s)) return BLUE;
         return RED;
     }
 
@@ -3996,23 +4927,26 @@ public class MainActivity extends Activity {
     }
 
     private String orderStatusLabel(String s) {
-        if ("completed".equals(s)) return "已完成";
+        if ("completed".equals(s) || "paid".equals(s)) return "已支付";
         if ("pending".equals(s)) return "处理中";
+        if ("refunded".equals(s)) return "已退款";
         if ("cancelled".equals(s) || "canceled".equals(s)) return "已取消";
         if ("failed".equals(s)) return "失败";
         return blankDash(s);
     }
 
     private int orderStatusColor(String s) {
-        if ("completed".equals(s)) return GREEN;
+        if ("completed".equals(s) || "paid".equals(s)) return GREEN;
         if ("pending".equals(s)) return AMBER;
+        if ("refunded".equals(s)) return BLUE;
         if ("failed".equals(s) || "cancelled".equals(s) || "canceled".equals(s)) return RED;
         return MUTED;
     }
 
     private int orderStatusBg(String s) {
-        if ("completed".equals(s)) return GREEN_SOFT;
+        if ("completed".equals(s) || "paid".equals(s)) return GREEN_SOFT;
         if ("pending".equals(s)) return AMBER_SOFT;
+        if ("refunded".equals(s)) return BLUE_SOFT;
         if ("failed".equals(s) || "cancelled".equals(s) || "canceled".equals(s)) return RED_SOFT;
         return SOFT;
     }
@@ -4020,14 +4954,19 @@ public class MainActivity extends Activity {
     private String orderKindLabel(String s) {
         if ("purchase".equals(s)) return "购买";
         if ("renew".equals(s) || "renewal".equals(s)) return "续费";
+        if ("traffic_reset".equals(s)) return "流量重置";
+        if ("admin_provision".equals(s)) return "管理员开通";
         return blankDash(s);
     }
 
     private String ledgerKindLabel(String s) {
-        if ("recharge".equals(s)) return "充值入账";
+        if ("recharge".equals(s) || "usdt_recharge".equals(s)) return "充值入账";
         if ("purchase".equals(s)) return "购买服务";
+        if ("traffic_reset".equals(s)) return "流量重置";
         if ("refund".equals(s)) return "退款";
-        if ("admin".equals(s) || "adjustment".equals(s)) return "余额调整";
+        if ("admin".equals(s) || "adjustment".equals(s) || "admin_adjust".equals(s)) return "余额调整";
+        if ("admin_credit".equals(s)) return "管理员增加余额";
+        if ("admin_debit".equals(s)) return "管理员扣除余额";
         return blankDash(s);
     }
 
@@ -4037,6 +4976,8 @@ public class MainActivity extends Activity {
         if ("detected".equals(s)) return "已检测";
         if ("manual".equals(s)) return "人工确认";
         if ("expired".equals(s)) return "已过期";
+        if ("cancelled".equals(s) || "canceled".equals(s)) return "已取消";
+        if ("exception".equals(s)) return "异常支付";
         if ("failed".equals(s)) return "失败";
         return blankDash(s);
     }
@@ -4044,14 +4985,14 @@ public class MainActivity extends Activity {
     private int rechargeStatusColor(String s) {
         if ("paid".equals(s) || "completed".equals(s)) return GREEN;
         if ("pending".equals(s) || "detected".equals(s) || "manual".equals(s)) return AMBER;
-        if ("failed".equals(s) || "expired".equals(s)) return RED;
+        if ("failed".equals(s) || "expired".equals(s) || "cancelled".equals(s) || "canceled".equals(s) || "exception".equals(s)) return RED;
         return MUTED;
     }
 
     private int rechargeStatusBg(String s) {
         if ("paid".equals(s) || "completed".equals(s)) return GREEN_SOFT;
         if ("pending".equals(s) || "detected".equals(s) || "manual".equals(s)) return AMBER_SOFT;
-        if ("failed".equals(s) || "expired".equals(s)) return RED_SOFT;
+        if ("failed".equals(s) || "expired".equals(s) || "cancelled".equals(s) || "canceled".equals(s) || "exception".equals(s)) return RED_SOFT;
         return SOFT;
     }
 
@@ -4064,12 +5005,20 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        String pending = prefs == null ? "" : prefs.getString("pending_update_apk", "");
+        if (!pending.isEmpty() && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && getPackageManager().canRequestPackageInstalls()) {
+            File apk = new File(pending);
+            if (apk.exists()) {
+                main.postDelayed(() -> installDownloadedApk(apk), 220L);
+                return;
+            } else {
+                prefs.edit().remove("pending_update_apk").apply();
+            }
+        }
         if (!resumedOnce) {
             resumedOnce = true;
             return;
         }
-        // Returning from browser recharge/payment or another external activity should
-        // quietly reconcile balance/status without forcing the user to press Refresh.
         if (!token.isEmpty() && contentHost != null && System.currentTimeMillis() - pausedAt > 1200L) {
             main.postDelayed(() -> {
                 if (inDetail && currentDetailServerId > 0) showServerDetail(currentDetailServerId);
