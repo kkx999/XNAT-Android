@@ -125,6 +125,8 @@ public class MainActivity extends Activity {
     private String billingMonth = "";
     private boolean updateCheckInProgress = false;
     private String pendingInstallPath = "";
+    private View transientNoticeView = null;
+    private Runnable transientNoticeDismiss = null;
     private static final long UPDATE_CHECK_INTERVAL_MS = 12L * 60L * 60L * 1000L;
     private final Map<Integer, JSONObject> cachedServerDetails = new HashMap<>();
     private final Map<Integer, JSONObject> cachedTicketDetails = new HashMap<>();
@@ -4839,7 +4841,99 @@ public class MainActivity extends Activity {
     }
 
     private void toast(String value) {
-        Toast.makeText(this, value, Toast.LENGTH_LONG).show();
+        if (value == null || value.trim().isEmpty()) return;
+
+        View content = findViewById(android.R.id.content);
+        if (!(content instanceof FrameLayout)) {
+            Toast.makeText(this, value, Toast.LENGTH_SHORT).show();
+            return;
+        }
+        FrameLayout overlayHost = (FrameLayout) content;
+
+        if (transientNoticeDismiss != null) {
+            main.removeCallbacks(transientNoticeDismiss);
+            transientNoticeDismiss = null;
+        }
+        if (transientNoticeView != null && transientNoticeView.getParent() instanceof ViewGroup) {
+            ((ViewGroup) transientNoticeView.getParent()).removeView(transientNoticeView);
+        }
+
+        String normalized = value.toLowerCase();
+        boolean error = normalized.contains("失败")
+                || normalized.contains("错误")
+                || normalized.contains("不存在")
+                || normalized.contains("invalid")
+                || normalized.contains("error")
+                || normalized.contains("failed");
+        boolean success = normalized.contains("成功")
+                || normalized.contains("完成")
+                || normalized.contains("最新版本")
+                || normalized.contains("已复制")
+                || normalized.contains("已取消")
+                || normalized.contains("已保存");
+
+        int accent = error ? RED : (success ? GREEN : BLUE);
+        int accentSoft = error ? RED_SOFT : (success ? GREEN_SOFT : SOFT_BLUE);
+        String markText = error ? "!" : (success ? "✓" : "·");
+
+        LinearLayout notice = horizontalRow();
+        notice.setGravity(Gravity.CENTER_VERTICAL);
+        notice.setPadding(dp(9), dp(7), dp(14), dp(7));
+        notice.setBackground(roundRect(CARD, dp(20), BORDER, 1));
+        notice.setElevation(dp(3));
+
+        TextView mark = text(markText, 13, accent, true);
+        mark.setGravity(Gravity.CENTER);
+        mark.setBackground(roundRect(accentSoft, dp(15), 0, 0));
+        notice.addView(mark, new LinearLayout.LayoutParams(dp(30), dp(30)));
+        gapH(notice, 9);
+
+        TextView label = text(value, 12, INK, true);
+        label.setGravity(Gravity.CENTER_VERTICAL);
+        label.setMaxLines(2);
+        notice.addView(label, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
+        lp.leftMargin = dp(22);
+        lp.rightMargin = dp(22);
+        lp.bottomMargin = navBar != null && navBar.isAttachedToWindow() ? dp(88) : dp(22);
+        overlayHost.addView(notice, lp);
+        transientNoticeView = notice;
+
+        notice.setAlpha(0f);
+        notice.setTranslationY(dp(10));
+        notice.setScaleX(0.97f);
+        notice.setScaleY(0.97f);
+        notice.animate()
+                .alpha(1f)
+                .translationY(0f)
+                .scaleX(1f)
+                .scaleY(1f)
+                .setDuration(180L)
+                .setInterpolator(motionEnter)
+                .start();
+
+        transientNoticeDismiss = () -> {
+            if (transientNoticeView != notice || notice.getParent() == null) return;
+            notice.animate()
+                    .alpha(0f)
+                    .translationY(dp(6))
+                    .scaleX(0.985f)
+                    .scaleY(0.985f)
+                    .setDuration(170L)
+                    .setInterpolator(motionStandard)
+                    .withEndAction(() -> {
+                        if (notice.getParent() instanceof ViewGroup) {
+                            ((ViewGroup) notice.getParent()).removeView(notice);
+                        }
+                        if (transientNoticeView == notice) transientNoticeView = null;
+                    })
+                    .start();
+        };
+        main.postDelayed(transientNoticeDismiss, value.length() > 24 ? 3200L : 2400L);
     }
 
     private String message(Exception e) {

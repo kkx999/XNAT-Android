@@ -1,8 +1,10 @@
-# XNAT Android v1.2.0-dev1
+# XNAT Android v1.2.0-dev2
 
-XNAT 官方原生 Android 客户端。v1.2.0-dev1 基于 v1.1.0 正式版做最小增量升级，对接 XNAT Panel v1.4.2 / Mobile API v1。
+XNAT 官方原生 Android 客户端。v1.2.0-dev2 基于 v1.1.0 正式版做最小增量升级，对接 XNAT Panel v1.4.2 / Mobile API v1。
 
-## v1.2.0-dev1
+## v1.2.0-dev2
+
+- 提示反馈 UI 收口：替换 Android 系统 Toast 为 XNAT 应用内悬浮胶囊，自动适配浅色/深色主题、成功/失败状态与底部导航，不再显示割裂的系统 App 图标 Toast。
 
 - 新增灵动启动遮罩：启动时并行恢复登录状态、准备首页与执行低频更新检查。
 - 新增 GitHub Releases 自动更新：自动检测正式 Release、App 内下载 APK、SHA-256 校验、调用 Android 系统安装器覆盖升级；账户中心支持手动检查更新。
@@ -24,8 +26,8 @@ XNAT 官方原生 Android 客户端。v1.2.0-dev1 基于 v1.1.0 正式版做最�
 - Host Agent：v1.1.1
 - Agent API：v1
 - Application ID：`com.xnat.mobile`
-- Version Name：`1.2.0-dev1`
-- Version Code：`10201`
+- Version Name：`1.2.0-dev2`
+- Version Code：`10202`
 - Min SDK：26
 - Target / Compile SDK：36
 
@@ -51,9 +53,9 @@ GitHub Actions 构建时会自动使用当前 `GITHUB_REPOSITORY` 作为更新�
 
 构建产物：
 
-- Artifact：`XNAT-Android-v1.2.0-dev1`
-- APK：`XNAT-Android-v1.2.0-dev1.apk`
-- SHA-256：`XNAT-Android-v1.2.0-dev1.apk.sha256`
+- Artifact：`XNAT-Android-v1.2.0-dev2`
+- APK：`XNAT-Android-v1.2.0-dev2.apk`
+- SHA-256：`XNAT-Android-v1.2.0-dev2.apk.sha256`
 
 继续使用 v1.1.0 相同正式签名证书时，可直接覆盖升级并保留登录、主题和本地设置。
 
