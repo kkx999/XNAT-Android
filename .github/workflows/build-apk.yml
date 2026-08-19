@@ -1,4 +1,4 @@
-name: Build XNAT Android v1.1.0
+name: Build XNAT Android
 
 on:
   workflow_dispatch:
@@ -43,6 +43,38 @@ jobs:
           yes | "$SDKMANAGER" --licenses >/dev/null || true
           "$SDKMANAGER" "platforms;android-36" "build-tools;35.0.0"
 
+      - name: Read app version
+        id: app_version
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          VERSION_NAME="$(sed -nE "s/^[[:space:]]*versionName[[:space:]]+['\"]([^'\"]+)['\"].*/\1/p" app/build.gradle | head -n 1)"
+          VERSION_CODE="$(sed -nE 's/^[[:space:]]*versionCode[[:space:]]+([0-9]+).*/\1/p' app/build.gradle | head -n 1)"
+
+          if [ -z "$VERSION_NAME" ]; then
+            echo "Unable to read versionName from app/build.gradle" >&2
+            exit 1
+          fi
+
+          if [ -z "$VERSION_CODE" ]; then
+            echo "Unable to read versionCode from app/build.gradle" >&2
+            exit 1
+          fi
+
+          if ! [[ "$VERSION_NAME" =~ ^[0-9A-Za-z._-]+$ ]]; then
+            echo "Invalid versionName for release filename: $VERSION_NAME" >&2
+            exit 1
+          fi
+
+          echo "version_name=$VERSION_NAME" >> "$GITHUB_OUTPUT"
+          echo "version_code=$VERSION_CODE" >> "$GITHUB_OUTPUT"
+
+          echo "XNAT_VERSION_NAME=$VERSION_NAME" >> "$GITHUB_ENV"
+          echo "XNAT_VERSION_CODE=$VERSION_CODE" >> "$GITHUB_ENV"
+
+          echo "Building XNAT Android v${VERSION_NAME} (versionCode ${VERSION_CODE})"
+
       - name: Restore release signing key
         shell: bash
         env:
@@ -52,12 +84,14 @@ jobs:
           KEY_PASSWORD: ${{ secrets.XNAT_KEY_PASSWORD }}
         run: |
           set -euo pipefail
+
           test -n "$KEYSTORE_BASE64"
           test -n "$KEYSTORE_PASSWORD"
           test -n "$KEY_ALIAS"
           test -n "$KEY_PASSWORD"
 
           KEYSTORE_PATH="${RUNNER_TEMP}/xnat-release.keystore"
+
           printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE_PATH"
 
           keytool -list \
@@ -74,6 +108,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
           find app/src/main/res -type f \
             \( -path '*/mipmap-*-v4/ic_launcher*' \
                -o -path '*/mipmap-*/ic_launcher.xml' \
@@ -88,25 +123,48 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
           APKSIGNER="$(command -v apksigner || true)"
+
           if [ -z "$APKSIGNER" ]; then
             APKSIGNER="${ANDROID_HOME}/build-tools/35.0.0/apksigner"
           fi
-          "$APKSIGNER" verify --print-certs app/build/outputs/apk/release/app-release.apk
+
+          "$APKSIGNER" verify \
+            --print-certs \
+            app/build/outputs/apk/release/app-release.apk
 
       - name: Prepare release artifact
         shell: bash
         run: |
           set -euo pipefail
+
+          APK_NAME="XNAT-Android-v${XNAT_VERSION_NAME}.apk"
+          SHA_NAME="${APK_NAME}.sha256"
+
+          rm -rf dist
           mkdir -p dist
-          cp app/build/outputs/apk/release/app-release.apk dist/XNAT-Android-v1.1.0.apk
+
+          cp \
+            app/build/outputs/apk/release/app-release.apk \
+            "dist/${APK_NAME}"
+
           cd dist
-          sha256sum XNAT-Android-v1.1.0.apk > XNAT-Android-v1.1.0.apk.sha256
+
+          sha256sum "$APK_NAME" > "$SHA_NAME"
+
+          echo "Release files:"
+          ls -lh "$APK_NAME" "$SHA_NAME"
+
+          echo
+          cat "$SHA_NAME"
 
       - name: Upload release APK
         uses: actions/upload-artifact@v4
         with:
-          name: XNAT-Android-v1.1.0
-          path: dist/*
+          name: XNAT-Android-v${{ steps.app_version.outputs.version_name }}
+          path: |
+            dist/XNAT-Android-v${{ steps.app_version.outputs.version_name }}.apk
+            dist/XNAT-Android-v${{ steps.app_version.outputs.version_name }}.apk.sha256
           if-no-files-found: error
           retention-days: 30
