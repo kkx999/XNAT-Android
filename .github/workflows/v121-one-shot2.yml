@@ -1,0 +1,167 @@
+name: XNAT Android v1.2.1 final patch
+
+on:
+  push:
+    branches:
+      - release/v1.2.1
+
+permissions:
+  contents: write
+
+jobs:
+  patch-build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: true
+
+      - name: Apply v1.2.1 fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          p = Path('app/src/main/java/com/xnat/mobile/MainActivity.java')
+          text = p.read_text()
+
+          def once(old, new, label):
+              global text
+              n = text.count(old)
+              if n != 1:
+                  raise SystemExit(f'{label}: expected 1 match, got {n}')
+              text = text.replace(old, new, 1)
+
+          # All current disk_gb reads are presentation fields. Panel v1.6.3 returns float.
+          text, disk_sites = re.subn(
+              r'\b([A-Za-z_][A-Za-z0-9_]*)\.optInt\("disk_gb", 0\)',
+              r'formatDiskGb(\1.optDouble("disk_gb", 0))',
+              text,
+          )
+          if disk_sites < 3:
+              raise SystemExit(f'expected at least 3 disk display sites, found {disk_sites}')
+          if 'optInt("disk_gb"' in text:
+              raise SystemExit('optInt(disk_gb) remains')
+
+          once('    private int systemBottomInset = 0;\n',
+               '    private int systemTopInset = 0;\n    private int systemBottomInset = 0;\n',
+               'systemTopInset')
+          once('''                systemBottomInset = bars.bottom;\n                view.setPadding(bars.left, bars.top, bars.right, bars.bottom);''',
+               '''                systemTopInset = bars.top;\n                systemBottomInset = bars.bottom;\n                view.setPadding(bars.left, bars.top, bars.right, bars.bottom);''',
+               'modern insets')
+          once('''                systemBottomInset = insets.getSystemWindowInsetBottom();\n                view.setPadding(insets.getSystemWindowInsetLeft(), insets.getSystemWindowInsetTop(),\n                        insets.getSystemWindowInsetRight(), systemBottomInset);''',
+               '''                systemTopInset = insets.getSystemWindowInsetTop();\n                systemBottomInset = insets.getSystemWindowInsetBottom();\n                view.setPadding(insets.getSystemWindowInsetLeft(), systemTopInset,\n                        insets.getSystemWindowInsetRight(), systemBottomInset);''',
+               'legacy insets')
+          once('''        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(\n                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,\n                Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);\n        lp.leftMargin = dp(22);\n        lp.rightMargin = dp(22);\n        // overlayHost itself is edge-to-edge, so include the navigation inset in\n        // addition to the XNAT bottom-nav clearance. This keeps notices floating\n        // above both the app navigation and the system gesture area on every device.\n        lp.bottomMargin = (navBar != null && navBar.isAttachedToWindow() ? dp(88) : dp(22))\n                + systemBottomInset;''',
+               '''        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(\n                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,\n                (error ? Gravity.TOP : Gravity.BOTTOM) | Gravity.CENTER_HORIZONTAL);\n        lp.leftMargin = dp(22);\n        lp.rightMargin = dp(22);\n        if (error) {\n            lp.topMargin = systemTopInset + dp(16);\n        } else {\n            lp.bottomMargin = (navBar != null && navBar.isAttachedToWindow() ? dp(88) : dp(22))\n                    + systemBottomInset;\n        }''',
+               'notice position')
+          once('''            else if (identity.contains("arch")) accent = Color.rgb(23, 147, 209);\n            else accent = BLUE;''',
+               '''            else if (identity.contains("arch")) accent = Color.rgb(23, 147, 209);\n            else if (identity.contains("alpine")) accent = Color.rgb(14, 143, 134);\n            else accent = BLUE;''',
+               'Alpine icon')
+          once('''    private String message(Exception e) {\n        String m = e.getMessage();\n        return m == null || m.trim().isEmpty() ? "操作失败" : m;\n    }\n\n    private String money(long cents) {''',
+               '''    private String message(Exception e) {\n        if (e == null) return "操作失败，请稍后再试";\n        String raw = e.getMessage() == null ? "" : e.getMessage().trim();\n        String lower = raw.toLowerCase(java.util.Locale.US);\n\n        if (e instanceof ApiClient.ApiException) {\n            int status = ((ApiClient.ApiException) e).status;\n            if (status == 401) return "登录已失效，请重新登录";\n            if (status == 403) return "当前账号没有权限执行此操作";\n            if (status == 404) return containsChinese(raw) ? raw : "请求的内容不存在或已被删除";\n            if (status == 429) return "操作过于频繁，请稍后再试";\n            if (status >= 500) {\n                if (lower.contains("agent") || lower.contains("host") || lower.contains("offline")\n                        || lower.contains("unreachable") || lower.contains("connection refused")\n                        || raw.contains("宿主机") || raw.contains("母机")) {\n                    return "宿主机当前离线或无法连接，请稍后再试";\n                }\n                return "服务器暂时异常，请稍后再试";\n            }\n            if (containsChinese(raw)) return raw;\n            if (status == 409) return "当前服务状态不允许执行此操作，请刷新后重试";\n            if (status >= 400) return "请求未能完成，请检查后重试";\n        }\n\n        if (e instanceof java.net.SocketTimeoutException || lower.contains("timeout")) {\n            return "连接服务器超时，请检查网络后重试";\n        }\n        if (e instanceof java.net.UnknownHostException || e instanceof java.net.ConnectException\n                || lower.contains("connection refused") || lower.contains("unreachable")) {\n            return "暂时无法连接服务器，请检查网络后重试";\n        }\n        if (containsChinese(raw)) return raw;\n        return "操作失败，请稍后再试";\n    }\n\n    private boolean containsChinese(String value) {\n        return value != null && value.matches(".*[\\u4e00-\\u9fff].*");\n    }\n\n    private String formatDiskGb(double value) {\n        String out = String.format(java.util.Locale.US, "%.3f", Math.max(0.0, value));\n        while (out.contains(".") && out.endsWith("0")) out = out.substring(0, out.length() - 1);\n        if (out.endsWith(".")) out = out.substring(0, out.length() - 1);\n        return out;\n    }\n\n    private String money(long cents) {''',
+               'friendly error handling')
+
+          required = [
+              'formatDiskGb(',
+              '宿主机当前离线或无法连接，请稍后再试',
+              '(error ? Gravity.TOP : Gravity.BOTTOM)',
+              'identity.contains("alpine")',
+          ]
+          for token in required:
+              if token not in text:
+                  raise SystemExit(f'missing contract: {token}')
+          p.write_text(text)
+
+          gradle = Path('app/build.gradle')
+          g = gradle.read_text()
+          if 'versionCode 10205' not in g or "versionName '1.2.0'" not in g:
+              raise SystemExit('unexpected version baseline')
+          gradle.write_text(g.replace('versionCode 10205', 'versionCode 10206', 1)
+                             .replace("versionName '1.2.0'", "versionName '1.2.1'", 1))
+
+          readme = Path('README.md')
+          r = readme.read_text()
+          compat = r.index('## 兼容关系')
+          r = '''# XNAT Android v1.2.1\n\nXNAT 官方原生 Android 客户端。v1.2.1 为兼容 XNAT Panel v1.6.3 / Mobile API v1 的问题修复版本，不改现有 UI 架构与主要交互。\n\n## v1.2.1\n\n- 修复小容量 LXC 套餐磁盘被整数截断的问题，正确显示 0.125 / 0.25 / 0.5 / 1.5 GB 等规格。\n- 修复重装、删除、开关机等操作失败提示靠近页面底部而不易察觉的问题；错误提示改为顶部醒目显示。\n- 统一常见网络、权限、宿主机离线和服务端异常的中文提示，避免直接暴露英文异常与 HTTP 状态码。\n- 补充 Alpine 3.24 系统图标识别；购买与重装仍使用 Panel 动态下发的系统镜像。\n- 同步兼容信息到 Panel v1.6.3 / Host Agent v1.2.0，Mobile API / Agent API 均保持 v1。\n\n''' + r[compat:]
+          for old, new in [
+              ('- Panel：v1.4.2', '- Panel：v1.6.3'),
+              ('- Host Agent：v1.1.1', '- Host Agent：v1.2.0'),
+              ('- Version Name：`1.2.0`', '- Version Name：`1.2.1`'),
+              ('- Version Code：`10205`', '- Version Code：`10206`'),
+              ('XNAT-Android-v1.2.0', 'XNAT-Android-v1.2.1'),
+              ('正式版 Version Code 为 `10205`。', '正式版 Version Code 为 `10206`。'),
+          ]:
+              r = r.replace(old, new)
+          readme.write_text(r)
+          print(f'v1.2.1 source contracts ok; converted disk sites={disk_sites}')
+          PY
+
+          git fetch origin main --depth=1
+          git show origin/main:.github/workflows/build-apk.yml > .github/workflows/build-apk.yml
+          rm -f .github/workflows/v121-one-shot.yml .github/workflows/v121-one-shot2.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "XNAT Android v1.2.1: fix Panel v1.6.3 compatibility"
+          git push origin HEAD:release/v1.2.1
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-version: '8.13'
+          cache-provider: basic
+      - name: Install Android SDK 36
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDKMANAGER="$(command -v sdkmanager || true)"
+          if [ -z "$SDKMANAGER" ]; then SDKMANAGER="${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager"; fi
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" "platforms;android-36" "build-tools;35.0.0"
+      - name: Restore signing key
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.XNAT_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.XNAT_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.XNAT_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.XNAT_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "$KEYSTORE_BASE64"; test -n "$KEYSTORE_PASSWORD"; test -n "$KEY_ALIAS"; test -n "$KEY_PASSWORD"
+          KEYSTORE_PATH="${RUNNER_TEMP}/xnat-release.keystore"
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE_PATH"
+          keytool -list -keystore "$KEYSTORE_PATH" -storepass "$KEYSTORE_PASSWORD" -alias "$KEY_ALIAS" >/dev/null
+          echo "XNAT_KEYSTORE_FILE=$KEYSTORE_PATH" >> "$GITHUB_ENV"
+          echo "XNAT_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
+          echo "XNAT_KEY_ALIAS=$KEY_ALIAS" >> "$GITHUB_ENV"
+          echo "XNAT_KEY_PASSWORD=$KEY_PASSWORD" >> "$GITHUB_ENV"
+      - name: Build release
+        run: gradle --no-daemon :app:assembleRelease
+      - name: Verify and package
+        shell: bash
+        run: |
+          set -euo pipefail
+          APKSIGNER="$(command -v apksigner || true)"
+          if [ -z "$APKSIGNER" ]; then APKSIGNER="${ANDROID_HOME}/build-tools/35.0.0/apksigner"; fi
+          "$APKSIGNER" verify --print-certs app/build/outputs/apk/release/app-release.apk
+          mkdir -p dist
+          cp app/build/outputs/apk/release/app-release.apk dist/XNAT-Android-v1.2.1.apk
+          cd dist
+          sha256sum XNAT-Android-v1.2.1.apk > XNAT-Android-v1.2.1.apk.sha256
+          cat XNAT-Android-v1.2.1.apk.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: XNAT-Android-v1.2.1
+          path: |
+            dist/XNAT-Android-v1.2.1.apk
+            dist/XNAT-Android-v1.2.1.apk.sha256
+          if-no-files-found: error
+          retention-days: 30
