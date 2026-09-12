@@ -1,34 +1,24 @@
-# XNAT Android v1.2.0
+# XNAT Android v1.2.1
 
-XNAT 官方原生 Android 客户端。v1.2.0 基于 v1.1.0 正式版做增量升级，对接 XNAT Panel v1.4.2 / Mobile API v1。
+XNAT 官方原生 Android 客户端。v1.2.1 为兼容 XNAT Panel v1.6.3 / Mobile API v1 的问题修复版本，不改现有 UI 架构与主要交互。
 
-## v1.2.0
+## v1.2.1
 
-- 新增灵动启动遮罩，启动时并行恢复登录状态、准备首页与执行低频更新检查。
-- 完成 Android 15/16 edge-to-edge 适配：状态栏、导航栏、Bottom Sheet 与系统手势区统一融入 XNAT 页面背景。
-- 新增 GitHub Releases 自动更新：检测正式 Release、App 内下载 APK、SHA-256 校验、调用 Android 系统安装器覆盖升级；账户中心支持手动检查更新。
-- 服务卡片升级：稳定编号、状态点、国家/地区高清国旗、系统、虚拟化、服务器地区、套餐名称与胶囊流量条。
-- 服务详情新增国家/地区、服务器地区、区域代码、网络线路、NAT 端口与套餐信息。
-- 新增删除服务器：使用稳定展示编号二次确认，复用 Mobile API 删除任务。
-- 新增付费流量重置：展示重置价格、可用状态、原因与流量周期，并调用 Mobile API 完成扣费和新周期创建。
-- 套餐购买页新增服务器地区、网络线路、NAT 端口与流量重置价格。
-- 原生 USDT 充值：TRON / Polygon、充值金额、锁定汇率、精确 USDT、二维码、地址复制、状态轮询、取消订单及人工模式 TxHash 提交。
-- 优化充值 Bottom Sheet：创建订单后在同一弹层内平滑切换，减少割裂感；倒计时原地更新，不再引起信息卡抖动。
-- 账务中心重构：余额卡 + 原生充值入口、订单 / 余额流水 / 充值记录分段、自然月份切换、日期精简为年月日。
-- 统一服务器、订单、余额流水与充值状态中文映射。
-- 电源与管理操作按服务器状态严格启用，避免开通中、重装中、删除中误触。
-- 提示反馈统一为 XNAT 应用内悬浮胶囊，适配浅色/深色主题和系统安全区域。
-- 继续使用 Android Keystore 加密保存登录令牌，正式版强制 HTTPS。
+- 修复小容量 LXC 套餐磁盘被整数截断的问题，正确显示 0.125 / 0.25 / 0.5 / 1.5 GB 等规格。
+- 修复重装、删除、开关机等操作失败提示靠近页面底部而不易察觉的问题；错误提示改为顶部醒目显示。
+- 统一常见网络、权限、宿主机离线和服务端异常的中文提示，避免直接暴露英文异常与 HTTP 状态码。
+- 补充 Alpine 3.24 系统图标识别；购买与重装仍使用 Panel 动态下发的系统镜像。
+- 同步兼容信息到 Panel v1.6.3 / Host Agent v1.2.0，Mobile API / Agent API 均保持 v1。
 
 ## 兼容关系
 
-- Panel：v1.4.2
+- Panel：v1.6.3
 - Mobile API：v1
-- Host Agent：v1.1.1
+- Host Agent：v1.2.0
 - Agent API：v1
 - Application ID：`com.xnat.mobile`
-- Version Name：`1.2.0`
-- Version Code：`10205`
+- Version Name：`1.2.1`
+- Version Code：`10206`
 - Min SDK：26
 - Target / Compile SDK：36
 
@@ -54,11 +44,11 @@ GitHub Actions 构建时会自动使用当前 `GITHUB_REPOSITORY` 作为更新�
 
 构建产物：
 
-- Artifact：`XNAT-Android-v1.2.0`
-- APK：`XNAT-Android-v1.2.0.apk`
-- SHA-256：`XNAT-Android-v1.2.0.apk.sha256`
+- Artifact：`XNAT-Android-v1.2.1`
+- APK：`XNAT-Android-v1.2.1.apk`
+- SHA-256：`XNAT-Android-v1.2.1.apk.sha256`
 
-继续使用此前版本相同的正式签名证书时，可直接覆盖升级并保留登录、主题和本地设置。正式版 Version Code 为 `10205`。
+继续使用此前版本相同的正式签名证书时，可直接覆盖升级并保留登录、主题和本地设置。正式版 Version Code 为 `10206`。
 
 **由 NAMELESS 和 GPT 倾力打造。**
 
