@@ -127,6 +127,7 @@ public class MainActivity extends Activity {
     private String pendingInstallPath = "";
     private View transientNoticeView = null;
     private Runnable transientNoticeDismiss = null;
+    private int systemTopInset = 0;
     private int systemBottomInset = 0;
     private static final long UPDATE_CHECK_INTERVAL_MS = 12L * 60L * 60L * 1000L;
     private final Map<Integer, JSONObject> cachedServerDetails = new HashMap<>();
@@ -884,7 +885,7 @@ public class MainActivity extends Activity {
             resource.addView(thinDivider());
             resource.addView(infoRow("内存", s.optInt("memory_mb", 0) + " MB"));
             resource.addView(thinDivider());
-            resource.addView(infoRow("硬盘", s.optInt("disk_gb", 0) + " GB"));
+            resource.addView(infoRow("硬盘", formatDiskGb(s.optDouble("disk_gb", 0)) + " GB"));
             resource.addView(thinDivider());
             resource.addView(infoRow("带宽", s.optInt("bandwidth_mbps", 0) + " Mbps"));
             resource.addView(thinDivider());
@@ -1123,7 +1124,7 @@ public class MainActivity extends Activity {
 
         LinearLayout spec = roundedBox(SOFT, 14, 0, 0);
         spec.setPadding(dp(13), dp(7), dp(13), dp(7));
-        spec.addView(infoRow("配置", plan.optInt("cpu", 0) + " vCPU · " + plan.optInt("memory_mb", 0) + " MB · " + plan.optInt("disk_gb", 0) + " GB"));
+        spec.addView(infoRow("配置", plan.optInt("cpu", 0) + " vCPU · " + plan.optInt("memory_mb", 0) + " MB · " + formatDiskGb(plan.optDouble("disk_gb", 0)) + " GB"));
         spec.addView(thinDivider());
         spec.addView(infoRow("网络", plan.optInt("bandwidth_mbps", 0) + " Mbps · " + plan.optInt("traffic_gb", 0) + " GB 流量"));
         spec.addView(thinDivider());
@@ -1170,7 +1171,7 @@ public class MainActivity extends Activity {
         summary.setPadding(dp(13), dp(7), dp(13), dp(7));
         summary.addView(infoRow("CPU / 内存", plan.optInt("cpu", 0) + " vCPU / " + plan.optInt("memory_mb", 0) + " MB"));
         summary.addView(thinDivider());
-        summary.addView(infoRow("硬盘 / 带宽", plan.optInt("disk_gb", 0) + " GB / " + plan.optInt("bandwidth_mbps", 0) + " Mbps"));
+        summary.addView(infoRow("硬盘 / 带宽", formatDiskGb(plan.optDouble("disk_gb", 0)) + " GB / " + plan.optInt("bandwidth_mbps", 0) + " Mbps"));
         summary.addView(thinDivider());
         summary.addView(infoRow("流量 / 端口", plan.optInt("traffic_gb", 0) + " GB / " + plan.optInt("nat_port", plan.optInt("port_count", 0)) + " 个"));
         summary.addView(thinDivider());
@@ -2207,7 +2208,7 @@ public class MainActivity extends Activity {
         endpoint.setPadding(dp(13), dp(8), dp(13), dp(8));
         endpoint.addView(infoRow("连接", blankDash(s.optString("public_ip", "")) + portSuffix(s.optInt("ssh_port", 0))));
         endpoint.addView(thinDivider());
-        endpoint.addView(infoRow("配置", s.optInt("cpu", 0) + " vCPU · " + s.optInt("memory_mb", 0) + " MB · " + s.optInt("disk_gb", 0) + " GB"));
+        endpoint.addView(infoRow("配置", s.optInt("cpu", 0) + " vCPU · " + s.optInt("memory_mb", 0) + " MB · " + formatDiskGb(s.optDouble("disk_gb", 0)) + " GB"));
         c.addView(endpoint, matchWrap());
         gap(c, 12);
 
@@ -4457,11 +4458,13 @@ public class MainActivity extends Activity {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 android.graphics.Insets bars = insets.getInsets(
                         WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
+                systemTopInset = bars.top;
                 systemBottomInset = bars.bottom;
                 view.setPadding(bars.left, bars.top, bars.right, bars.bottom);
             } else {
+                systemTopInset = insets.getSystemWindowInsetTop();
                 systemBottomInset = insets.getSystemWindowInsetBottom();
-                view.setPadding(insets.getSystemWindowInsetLeft(), insets.getSystemWindowInsetTop(),
+                view.setPadding(insets.getSystemWindowInsetLeft(), systemTopInset,
                         insets.getSystemWindowInsetRight(), systemBottomInset);
             }
             return insets;
@@ -4877,6 +4880,7 @@ public class MainActivity extends Activity {
             else if (identity.contains("rocky")) accent = Color.rgb(16, 142, 97);
             else if (identity.contains("alma")) accent = Color.rgb(0, 149, 166);
             else if (identity.contains("arch")) accent = Color.rgb(23, 147, 209);
+            else if (identity.contains("alpine")) accent = Color.rgb(14, 143, 134);
             else accent = BLUE;
 
             paint.setStyle(Paint.Style.FILL);
@@ -5114,14 +5118,15 @@ public class MainActivity extends Activity {
 
         FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
-                Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
+                (error ? Gravity.TOP : Gravity.BOTTOM) | Gravity.CENTER_HORIZONTAL);
         lp.leftMargin = dp(22);
         lp.rightMargin = dp(22);
-        // overlayHost itself is edge-to-edge, so include the navigation inset in
-        // addition to the XNAT bottom-nav clearance. This keeps notices floating
-        // above both the app navigation and the system gesture area on every device.
-        lp.bottomMargin = (navBar != null && navBar.isAttachedToWindow() ? dp(88) : dp(22))
-                + systemBottomInset;
+        if (error) {
+            lp.topMargin = systemTopInset + dp(16);
+        } else {
+            lp.bottomMargin = (navBar != null && navBar.isAttachedToWindow() ? dp(88) : dp(22))
+                    + systemBottomInset;
+        }
         overlayHost.addView(notice, lp);
         transientNoticeView = notice;
 
@@ -5159,8 +5164,49 @@ public class MainActivity extends Activity {
     }
 
     private String message(Exception e) {
-        String m = e.getMessage();
-        return m == null || m.trim().isEmpty() ? "操作失败" : m;
+        if (e == null) return "操作失败，请稍后再试";
+        String raw = e.getMessage() == null ? "" : e.getMessage().trim();
+        String lower = raw.toLowerCase(java.util.Locale.US);
+
+        if (e instanceof ApiClient.ApiException) {
+            int status = ((ApiClient.ApiException) e).status;
+            if (status == 401) return "登录已失效，请重新登录";
+            if (status == 403) return "当前账号没有权限执行此操作";
+            if (status == 404) return containsChinese(raw) ? raw : "请求的内容不存在或已被删除";
+            if (status == 429) return "操作过于频繁，请稍后再试";
+            if (status >= 500) {
+                if (lower.contains("agent") || lower.contains("host") || lower.contains("offline")
+                        || lower.contains("unreachable") || lower.contains("connection refused")
+                        || raw.contains("宿主机") || raw.contains("母机")) {
+                    return "宿主机当前离线或无法连接，请稍后再试";
+                }
+                return "服务器暂时异常，请稍后再试";
+            }
+            if (containsChinese(raw)) return raw;
+            if (status == 409) return "当前服务状态不允许执行此操作，请刷新后重试";
+            if (status >= 400) return "请求未能完成，请检查后重试";
+        }
+
+        if (e instanceof java.net.SocketTimeoutException || lower.contains("timeout")) {
+            return "连接服务器超时，请检查网络后重试";
+        }
+        if (e instanceof java.net.UnknownHostException || e instanceof java.net.ConnectException
+                || lower.contains("connection refused") || lower.contains("unreachable")) {
+            return "暂时无法连接服务器，请检查网络后重试";
+        }
+        if (containsChinese(raw)) return raw;
+        return "操作失败，请稍后再试";
+    }
+
+    private boolean containsChinese(String value) {
+        return value != null && value.matches(".*[\u4e00-\u9fff].*");
+    }
+
+    private String formatDiskGb(double value) {
+        String out = String.format(java.util.Locale.US, "%.3f", Math.max(0.0, value));
+        while (out.contains(".") && out.endsWith("0")) out = out.substring(0, out.length() - 1);
+        if (out.endsWith(".")) out = out.substring(0, out.length() - 1);
+        return out;
     }
 
     private String money(long cents) {
