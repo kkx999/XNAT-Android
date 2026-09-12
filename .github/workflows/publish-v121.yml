@@ -1,0 +1,104 @@
+name: Publish XNAT Android v1.2.1
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/publish-v121.yml
+
+permissions:
+  contents: write
+
+env:
+  RELEASE_TAG: v1.2.1
+  RELEASE_TARGET: b94fb4924c625c25bfbeb90747a6c3e0177f6d03
+  ARTIFACT_ID: '10298003767'
+  APK_SHA256: 3b6a6cfe511e6d2ccdd1723bdf0094aab3a5d4476f704761a7ae8d225b16fcc3
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+          persist-credentials: true
+          fetch-depth: 0
+
+      - name: Download and verify signed v1.2.1 artifact
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          curl -fsSL \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${ARTIFACT_ID}/zip" \
+            -o /tmp/xnat-v121.zip
+          unzip -q /tmp/xnat-v121.zip -d dist
+          test -f dist/XNAT-Android-v1.2.1.apk
+          test -f dist/XNAT-Android-v1.2.1.apk.sha256
+          echo "${APK_SHA256}  dist/XNAT-Android-v1.2.1.apk" | sha256sum -c -
+          grep -q "^${APK_SHA256}  XNAT-Android-v1.2.1.apk$" dist/XNAT-Android-v1.2.1.apk.sha256
+
+      - name: Publish formal GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            echo "Release ${RELEASE_TAG} already exists" >&2
+            exit 1
+          fi
+          cat > /tmp/release-notes.md <<'EOF'
+          # XNAT Android v1.2.1
+
+          问题修复版本，不改现有 UI 架构与主要交互。
+
+          - 修复 0.125 / 0.25 / 0.5 / 1.5 GB 等小容量 LXC 磁盘规格被整数截断的问题。
+          - 重装、删除、开关机等操作失败提示改为顶部醒目显示，宿主机离线等重要错误不再藏在页面底部。
+          - 常见网络、权限、宿主机离线、超时与服务端异常改为用户可理解的中文提示。
+          - 补充 Alpine 3.24 系统图标识别；购买与重装流程保持不变。
+          - 兼容 XNAT Panel v1.6.3 / Host Agent v1.2.0，Mobile API / Agent API 均保持 v1。
+
+          APK SHA-256：`3b6a6cfe511e6d2ccdd1723bdf0094aab3a5d4476f704761a7ae8d225b16fcc3`
+          EOF
+          gh release create "${RELEASE_TAG}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --target "${RELEASE_TARGET}" \
+            --title "XNAT Android v1.2.1" \
+            --notes-file /tmp/release-notes.md \
+            --latest \
+            "dist/XNAT-Android-v1.2.1.apk#XNAT Android v1.2.1 APK" \
+            "dist/XNAT-Android-v1.2.1.apk.sha256#SHA-256 checksum"
+
+      - name: Verify formal release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          json="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}")"
+          test "$(jq -r '.draft' <<<"$json")" = "false"
+          test "$(jq -r '.prerelease' <<<"$json")" = "false"
+          test "$(jq -r '.tag_name' <<<"$json")" = "${RELEASE_TAG}"
+          test "$(jq -r '.target_commitish' <<<"$json")" = "${RELEASE_TARGET}"
+          test "$(jq -r '[.assets[].name] | index("XNAT-Android-v1.2.1.apk") != null' <<<"$json")" = "true"
+          test "$(jq -r '[.assets[].name] | index("XNAT-Android-v1.2.1.apk.sha256") != null' <<<"$json")" = "true"
+          echo "Formal release verified"
+
+      - name: Remove one-shot publisher
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/publish-v121.yml
+          git commit -m "ci: remove v1.2.1 publisher"
+          git push origin HEAD:main
