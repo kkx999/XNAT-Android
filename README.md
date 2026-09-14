@@ -2,7 +2,7 @@
 
 > XNAT 官方原生 Android 客户端，通过 **Mobile API v1** 连接 XNAT Panel。
 
-**当前正式版本：v1.0.1**
+**当前正式版本：v1.0.2**
 
 <div align="center">
 
@@ -17,8 +17,8 @@
 正式 Release 当前包含：
 
 ```text
-XNAT-Android-v1.0.1.apk
-XNAT-Android-v1.0.1.apk.sha256
+XNAT-Android-v1.0.2.apk
+XNAT-Android-v1.0.2.apk.sha256
 ```
 
 App 使用 GitHub `releases/latest` 检查正式版本，因此开发版或 RC 应发布为 **Pre-release**，不会作为正式更新推送。
@@ -54,8 +54,8 @@ XNAT_KEY_PASSWORD
 当前正式构建产物：
 
 ```text
-XNAT-Android-v1.0.1.apk
-XNAT-Android-v1.0.1.apk.sha256
+XNAT-Android-v1.0.2.apk
+XNAT-Android-v1.0.2.apk.sha256
 ```
 
 ---

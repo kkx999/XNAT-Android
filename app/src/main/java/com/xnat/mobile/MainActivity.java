@@ -1026,6 +1026,9 @@ public class MainActivity extends Activity {
         io.execute(() -> {
             try {
                 JSONObject data = ApiClient.request(baseUrl, "/api/v1/catalog", "GET", token, null);
+                JSONObject imageData = ApiClient.request(baseUrl, "/api/v1/system-images", "GET", token, null);
+                JSONArray dynamicImages = imageData.optJSONArray("items");
+                if (dynamicImages != null) data.put("system_images", dynamicImages);
                 main.post(() -> {
                     if (!inDetail || gen != screenGeneration || currentDetailServerId != 0 || currentTicketId != 0) return;
                     swipe.setRefreshing(false);
@@ -5245,14 +5248,10 @@ public class MainActivity extends Activity {
 
     private double minimumImageDiskGb(JSONObject image, String virtualizationType) {
         double minimum = image == null ? 0 : image.optDouble("min_disk_gb", 0);
-        String alias = image == null ? "" : image.optString("alias", "").trim().toLowerCase(java.util.Locale.US);
-        String family = image == null ? "" : image.optString("family", "").trim().toLowerCase(java.util.Locale.US);
-        if (minimum <= 0) {
-            if (alias.startsWith("images:alpine/") || "alpine".equals(family)) minimum = 1.0;
-            else if (alias.startsWith("images:ubuntu/") || alias.startsWith("images:debian/") || "apt".equals(family)) minimum = 2.0;
-            else minimum = 1.0;
+        if (!Double.isFinite(minimum) || minimum < 0) minimum = 0;
+        if ("kvm".equalsIgnoreCase(virtualizationType) && minimum > 0) {
+            minimum = Math.max(minimum, 3.0);
         }
-        if ("kvm".equalsIgnoreCase(virtualizationType)) minimum = Math.max(minimum, 4.0);
         return minimum;
     }
 

@@ -8,8 +8,8 @@ XNAT Android 是 **XNAT 官方原生 Android 客户端**。
 
 | 项目 | 版本 |
 | --- | --- |
-| XNAT Android | v1.0.1 |
-| XNAT Panel | v1.0.2 |
+| XNAT Android | v1.0.2 |
+| XNAT Panel | v1.0.3 |
 | Mobile API | v1 |
 | Application ID | `com.xnat.mobile` |
 | Min SDK | 26 |
@@ -17,9 +17,9 @@ XNAT Android 是 **XNAT 官方原生 Android 客户端**。
 
 ## 版本说明
 
-v1.0.1 是兼容性体验更新。系统镜像选择会提前提示最低系统盘要求，不兼容镜像不可选择；现有 UI 架构、页面布局、视觉风格和主要交互保持不变。
+v1.0.2 是系统镜像最低系统盘策略同步更新。购买和重装继续保留提前兼容提示，但最低磁盘不再由 Android 按发行版写死，而是直接读取 XNAT Panel v1.0.3 的 Mobile API v1 `/api/v1/system-images` 下发的 `min_disk_gb`。
 
-Android 继续使用 Mobile API v1，与当前 XNAT Panel v1.0.2 保持兼容。Host Agent API v2 属于 Panel ↔ Host 内部通信，Android 不直接接触 Host Agent。
+LXC 直接使用 Panel 配置；KVM 在 Panel 返回有效最低磁盘时仅保留与 Panel v1.0.3 一致的 3 GiB 技术底线。连接旧 Panel 且未返回 `min_disk_gb` 时，Android 不做本地误拦截，最终仍由 Panel 后端校验。Host Agent API v2 属于 Panel ↔ Host 内部通信，Android 不直接接触 Host Agent。现有 UI 架构、页面布局、视觉风格和主要交互保持不变。
 
 ## 能做什么
 
@@ -39,7 +39,7 @@ XNAT Android
      │
      │ HTTPS / Mobile API v1
      ▼
-XNAT Panel v1.0.2
+XNAT Panel v1.0.3
      │
      │ Agent API v2
      ▼
@@ -49,6 +49,15 @@ Host Agent / Incus
 Android 客户端不保存或使用 Host Agent Token，也不会直接连接 Host 管理端口。服务器、套餐、系统镜像与业务状态均由 Panel 统一下发。
 
 ## 更新记录
+
+### v1.0.2
+
+- 购买服务器与重装系统统一读取 Panel `/api/v1/system-images` 下发的 `min_disk_gb`。
+- 移除 Android 端 Alpine / Debian / Ubuntu 的固定最低磁盘规则。
+- LXC 直接使用 Panel 配置；KVM 仅保留与 Panel v1.0.3 一致的 3 GiB 技术底线。
+- 连接旧 Panel 且未返回 `min_disk_gb` 时不做本地误拦截，最终由 Panel 后端校验。
+- 不兼容镜像继续置灰并显示 `需 ≥xG`，购买与重装的现有交互保持不变。
+- Mobile API 保持 v1；UI、主题、页面布局和其他业务逻辑不变。
 
 ### v1.0.1
 
@@ -73,11 +82,11 @@ v1.0.0 是重新整理后的 Android 正式基线：
 
 ## 更新与发布
 
-Android v1.0.1 的 `versionName` 为 `1.0.1`，内部 `versionCode` 为 `10208`。正式 Release 包含：
+Android v1.0.2 的 `versionName` 为 `1.0.2`，内部 `versionCode` 为 `10209`。正式 Release 包含：
 
 ```text
-XNAT-Android-v1.0.1.apk
-XNAT-Android-v1.0.1.apk.sha256
+XNAT-Android-v1.0.2.apk
+XNAT-Android-v1.0.2.apk.sha256
 ```
 
 App 使用 GitHub `releases/latest` 检查正式版本，因此开发版或 RC 应发布为 **Pre-release**，不会作为正式更新推送。
