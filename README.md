@@ -4,18 +4,18 @@
 
 XNAT Android 通过 **Mobile API v1** 连接 XNAT Panel，为用户提供移动端的服务器管理、套餐购买、订单与工单等常用功能。App 只连接 Panel，不直接访问 Host Agent。
 
-**当前正式版本：v1.0.0**
+**当前正式版本：v1.0.1**
 
 | 项目 | 版本 |
 | --- | --- |
-| XNAT Android | v1.0.0 |
-| XNAT Panel | v1.0.0 |
+| XNAT Android | v1.0.1 |
+| XNAT Panel | v1.0.2 |
 | Mobile API | v1 |
 | Application ID | `com.xnat.mobile` |
 | Min SDK | 26 |
 | Target / Compile SDK | 36 |
 
-> v1.0.0 是重新整理后的 Android 正式基线。保留现有 UI、页面布局、视觉风格和主要交互逻辑，不做界面重构。
+> v1.0.1 是兼容性体验更新：系统镜像选择会提前提示最低系统盘要求，不兼容镜像不可选择；现有 UI 架构、页面布局、视觉风格和主要交互保持不变。
 
 ---
 
@@ -38,9 +38,9 @@ XNAT Android
      │
      │ HTTPS / Mobile API v1
      ▼
-XNAT Panel v1.0.0
+XNAT Panel v1.0.2
      │
-     │ Agent API v1
+     │ Agent API v2
      ▼
 Host Agent / Incus
 ```
@@ -49,19 +49,30 @@ Android 客户端不保存或使用 Host Agent Token，也不会直接连接 Hos
 
 ---
 
+## v1.0.1 更新
+
+- 购买服务器和重装系统两个镜像选择入口都会提前校验系统盘兼容性。
+- Alpine 默认按至少 1 GB、Debian / Ubuntu 默认按至少 2 GB、KVM 至少按 4 GB 判断，与 XNAT Panel v1.0.2 当前规则一致。
+- 不兼容镜像仍保留在列表中，但会置灰并显示 `需 ≥xG`，点击时给出明确中文提示，不再等提交后才看到 409。
+- 如果连接的旧 Panel 无法提供服务器磁盘信息，Android 不会误拦截，仍交给 Panel 后端最终校验。
+- 代码预留读取未来 `min_disk_gb` 字段的能力，Mobile API 仍保持 v1。
+- 不修改现有 UI 架构、主题、页面布局和主要交互方式。
+
+---
+
 ## v1.0.0 基线
 
-本次仅整理版本体系、兼容说明、项目介绍与发布流程，现有 App 功能逻辑继续沿用已经稳定的代码：
+v1.0.0 是重新整理后的 Android 正式基线，现有 App 功能逻辑继续沿用已经稳定的代码：
 
 - 对外版本重新从 **v1.0.0** 开始。
-- 对接 **XNAT Panel v1.0.0 / Mobile API v1**。
+- 对接 **XNAT Panel / Mobile API v1**。
 - 保留小容量 LXC 套餐磁盘规格的正确显示。
 - 保留重装、删除、开关机等操作的顶部错误提示。
 - 保留网络、权限、Host 离线和服务端异常的中文错误说明。
 - 保留 Panel 动态下发的系统镜像与 Alpine 3.24 图标识别。
 - **不修改现有 UI 架构、页面布局、主题和主要交互方式。**
 
-Android 的 `versionName` 重置为 `1.0.0`，内部 `versionCode` 继续递增为 `10207`。这样既保持新的公开版本体系干净，也避免已安装旧版在使用相同正式签名时因为 Version Code 回退而无法覆盖安装。
+Android v1.0.1 的 `versionName` 为 `1.0.1`，内部 `versionCode` 递增为 `10208`，继续保证使用相同正式签名时可以覆盖安装。
 
 ---
 
@@ -70,8 +81,8 @@ Android 的 `versionName` 重置为 `1.0.0`，内部 `versionCode` 继续递增�
 正式 Release 至少包含：
 
 ```text
-XNAT-Android-v1.0.0.apk
-XNAT-Android-v1.0.0.apk.sha256
+XNAT-Android-v1.0.1.apk
+XNAT-Android-v1.0.1.apk.sha256
 ```
 
 App 使用 GitHub `releases/latest` 检查正式版本，因此开发版或 RC 应发布为 **Pre-release**，不会作为正式更新推送。
@@ -107,8 +118,8 @@ XNAT_KEY_PASSWORD
 当前正式构建产物：
 
 ```text
-XNAT-Android-v1.0.0.apk
-XNAT-Android-v1.0.0.apk.sha256
+XNAT-Android-v1.0.1.apk
+XNAT-Android-v1.0.1.apk.sha256
 ```
 
 ---
@@ -117,7 +128,7 @@ XNAT-Android-v1.0.0.apk.sha256
 
 Release 构建默认禁止明文 HTTP Panel；正式使用建议始终配置 HTTPS。Debug 构建可临时连接 HTTP Panel，App 会在发送凭据前提示风险。
 
-正式签名证书应持续使用同一套密钥。只要 Application ID 与签名证书保持一致，新的 v1.0.0 可以覆盖安装到此前正式客户端上，并保留本地登录、主题和设置。
+正式签名证书应持续使用同一套密钥。只要 Application ID 与签名证书保持一致，新的 v1.0.1 可以覆盖安装到此前正式客户端上，并保留本地登录、主题和设置。
 
 ---
 
