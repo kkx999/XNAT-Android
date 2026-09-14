@@ -31,13 +31,14 @@ old_method = '''    private double minimumImageDiskGb(JSONObject image, String v
 new_method = '''    private double minimumImageDiskGb(JSONObject image, String virtualizationType) {\n        double minimum = image == null ? 0 : image.optDouble("min_disk_gb", 0);\n        if (!Double.isFinite(minimum) || minimum < 0) minimum = 0;\n        if ("kvm".equalsIgnoreCase(virtualizationType) && minimum > 0) {\n            minimum = Math.max(minimum, 3.0);\n        }\n        return minimum;\n    }\n'''
 replace_once("app/src/main/java/com/xnat/mobile/MainActivity.java", old_method, new_method)
 
-# README current release metadata.
+# README current release metadata. Replace the longer checksum filename first
+# so the plain .apk replacement cannot consume its prefix.
 readme_path = Path("README.md")
 readme = readme_path.read_text()
 for old, new in [
     ("**当前正式版本：v1.0.1**", "**当前正式版本：v1.0.2**"),
-    ("XNAT-Android-v1.0.1.apk", "XNAT-Android-v1.0.2.apk"),
     ("XNAT-Android-v1.0.1.apk.sha256", "XNAT-Android-v1.0.2.apk.sha256"),
+    ("XNAT-Android-v1.0.1.apk", "XNAT-Android-v1.0.2.apk"),
 ]:
     if old not in readme:
         raise SystemExit(f"README.md missing expected token: {old}")
@@ -75,8 +76,8 @@ intro = intro.replace(marker, entry, 1)
 release_section = intro.index("## 更新与发布")
 head = intro[:release_section]
 tail = intro[release_section:]
-tail = tail.replace("XNAT-Android-v1.0.1.apk", "XNAT-Android-v1.0.2.apk")
 tail = tail.replace("XNAT-Android-v1.0.1.apk.sha256", "XNAT-Android-v1.0.2.apk.sha256")
+tail = tail.replace("XNAT-Android-v1.0.1.apk", "XNAT-Android-v1.0.2.apk")
 intro_path.write_text(head + tail)
 
 # Release notes consumed by the publishing workflow after all checks pass.
