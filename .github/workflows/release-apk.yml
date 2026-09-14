@@ -60,7 +60,6 @@ jobs:
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
-          import re
 
           gradle = Path('app/build.gradle').read_text()
           assert "versionCode 10209" in gradle
@@ -78,6 +77,13 @@ jobs:
           assert 'images:alpine/' not in method
           assert '"apt".equals(family)' not in method
           assert '4.0' not in method
+
+          catalog_start = src.index('    private void loadCatalog(')
+          catalog_end = src.index('    private void renderCatalog(', catalog_start)
+          catalog_loader = src[catalog_start:catalog_end]
+          assert '"/api/v1/catalog"' in catalog_loader
+          assert '"/api/v1/system-images"' in catalog_loader
+          assert 'data.put("system_images", dynamicImages)' in catalog_loader
 
           readme = Path('README.md').read_text()
           intro = Path('docs/INTRODUCTION.md').read_text()
