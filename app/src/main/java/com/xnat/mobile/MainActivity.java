@@ -111,6 +111,23 @@ public class MainActivity extends Activity {
     private boolean actionInProgress = false;
     private boolean managementActionInProgress = false;
     private long lastBackPressAt = 0L;
+    private static final long LIVE_METRICS_INTERVAL_MS = 5000L;
+    private static final String TAG_LIVE_CPU_VALUE = "xnat_live_cpu_value";
+    private static final String TAG_LIVE_CPU_DETAIL = "xnat_live_cpu_detail";
+    private static final String TAG_LIVE_CPU_BAR = "xnat_live_cpu_bar";
+    private static final String TAG_LIVE_MEMORY_VALUE = "xnat_live_memory_value";
+    private static final String TAG_LIVE_MEMORY_DETAIL = "xnat_live_memory_detail";
+    private static final String TAG_LIVE_MEMORY_BAR = "xnat_live_memory_bar";
+    private static final String TAG_LIVE_DISK_VALUE = "xnat_live_disk_value";
+    private static final String TAG_LIVE_DISK_DETAIL = "xnat_live_disk_detail";
+    private static final String TAG_LIVE_DISK_BAR = "xnat_live_disk_bar";
+    private static final String TAG_LIVE_RX = "xnat_live_rx";
+    private static final String TAG_LIVE_TX = "xnat_live_tx";
+    private static final String TAG_LIVE_NETWORK_DETAIL = "xnat_live_network_detail";
+    private Runnable liveMetricsPollTask = null;
+    private LinearLayout liveMetricsPage = null;
+    private int liveMetricsServerId = 0;
+    private boolean appResumed = false;
 
     // Keep the last successful payload for each top-level screen.
     // Switching tabs now paints immediately from cache and refreshes quietly
@@ -207,6 +224,7 @@ public class MainActivity extends Activity {
     }
 
     private void showLogin() {
+        stopLiveMetricsPolling();
         inDetail = false;
         screenGeneration++;
         passwordVisible = false;
@@ -431,6 +449,7 @@ public class MainActivity extends Activity {
     }
 
     private void showApp(int tab) {
+        stopLiveMetricsPolling();
         root.removeAllViews();
         inDetail = false;
 
@@ -525,6 +544,7 @@ public class MainActivity extends Activity {
         }
         int oldTab = currentTab;
         boolean returningFromDetail = inDetail;
+        stopLiveMetricsPolling();
         currentTab = tab;
         inDetail = false;
         screenGeneration++;
@@ -540,6 +560,7 @@ public class MainActivity extends Activity {
     }
 
     private void reloadCurrentTab() {
+        stopLiveMetricsPolling();
         // Re-render directly without first clearing contentHost. This avoids the
         // one-frame white/empty flash that used to happen after power or management
         // actions while still issuing a fresh background request.
@@ -750,6 +771,7 @@ public class MainActivity extends Activity {
     }
 
     private void showServerDetail(int serverId) {
+        stopLiveMetricsPolling();
         inDetail = true;
         detailParentTab = TAB_SERVICES;
         currentTicketId = 0;
@@ -814,6 +836,285 @@ public class MainActivity extends Activity {
                 });
             }
         });
+    }
+
+    private LinearLayout liveMetricCell(String label, String valueText, String detailText,
+                                              String valueTag, String detailTag, String barTag) {
+        LinearLayout cell = column();
+        cell.setPadding(dp(4), dp(2), dp(4), dp(2));
+        cell.addView(text(label, 11, MUTED, true));
+
+        TextView value = text(valueText, 20, INK, true);
+        value.setTag(valueTag);
+        value.setPadding(0, dp(4), 0, 0);
+        cell.addView(value, matchWrap());
+
+        TextView detail = text(detailText, 10, MUTED, false);
+        detail.setTag(detailTag);
+        detail.setPadding(0, dp(3), 0, 0);
+        cell.addView(detail, matchWrap());
+
+        if (barTag != null) {
+            gap(cell, 9);
+            LinearLayout bar = horizontalRow();
+            bar.setTag(barTag);
+            bar.setBackground(roundRect(SOFT, dp(99), 0, 0));
+            cell.addView(bar, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(7)));
+            setLiveMetricBar(bar, 0.0);
+        }
+        return cell;
+    }
+
+    private LinearLayout liveNetworkCell() {
+        LinearLayout cell = column();
+        cell.setPadding(dp(4), dp(2), dp(4), dp(2));
+        cell.addView(text("实时网络", 11, MUTED, true));
+
+        TextView rx = text("↓ 采样中…", 17, INK, true);
+        rx.setTag(TAG_LIVE_RX);
+        rx.setPadding(0, dp(4), 0, 0);
+        cell.addView(rx, matchWrap());
+
+        TextView tx = text("↑ 采样中…", 14, INK, true);
+        tx.setTag(TAG_LIVE_TX);
+        tx.setPadding(0, dp(3), 0, 0);
+        cell.addView(tx, matchWrap());
+
+        TextView detail = text("当前实际下载 / 上传速率", 10, MUTED, false);
+        detail.setTag(TAG_LIVE_NETWORK_DETAIL);
+        detail.setPadding(0, dp(5), 0, 0);
+        cell.addView(detail, matchWrap());
+        return cell;
+    }
+
+    private void addLiveMetricsSection(LinearLayout page, int serverId) {
+        int targetId = serverId > 0 ? serverId : currentDetailServerId;
+        page.addView(sectionHeader("实时资源监控", "当前实例 CPU、内存、硬盘与网络速率", "5 秒刷新"), matchWrap());
+        gap(page, 10);
+
+        LinearLayout panel = surfaceCard(18);
+        panel.setPadding(dp(14), dp(14), dp(14), dp(14));
+
+        LinearLayout row1 = horizontalRow();
+        row1.setGravity(Gravity.TOP);
+        row1.addView(liveMetricCell("CPU 使用率", "采样中…", "正在计算瞬时使用率",
+                TAG_LIVE_CPU_VALUE, TAG_LIVE_CPU_DETAIL, TAG_LIVE_CPU_BAR), weighted());
+        gapH(row1, 14);
+        row1.addView(liveMetricCell("内存使用", "采样中…", "正在读取实例内存",
+                TAG_LIVE_MEMORY_VALUE, TAG_LIVE_MEMORY_DETAIL, TAG_LIVE_MEMORY_BAR), weighted());
+        panel.addView(row1, matchWrap());
+
+        gap(panel, 13);
+        panel.addView(thinDivider());
+        gap(panel, 13);
+
+        LinearLayout row2 = horizontalRow();
+        row2.setGravity(Gravity.TOP);
+        row2.addView(liveMetricCell("硬盘使用", "采样中…", "正在读取系统盘",
+                TAG_LIVE_DISK_VALUE, TAG_LIVE_DISK_DETAIL, TAG_LIVE_DISK_BAR), weighted());
+        gapH(row2, 14);
+        row2.addView(liveNetworkCell(), weighted());
+        panel.addView(row2, matchWrap());
+
+        page.addView(panel, matchWrap());
+        startLiveMetricsPolling(page, targetId);
+    }
+
+    private TextView liveTaggedText(LinearLayout page, String tag) {
+        if (page == null) return null;
+        View view = page.findViewWithTag(tag);
+        return view instanceof TextView ? (TextView) view : null;
+    }
+
+    private LinearLayout liveTaggedBar(LinearLayout page, String tag) {
+        if (page == null) return null;
+        View view = page.findViewWithTag(tag);
+        return view instanceof LinearLayout ? (LinearLayout) view : null;
+    }
+
+    private void setLiveText(LinearLayout page, String tag, String value) {
+        TextView view = liveTaggedText(page, tag);
+        if (view != null) view.setText(value);
+    }
+
+    private double clampLivePercent(double percent) {
+        if (Double.isNaN(percent) || Double.isInfinite(percent)) return Double.NaN;
+        return Math.max(0.0, Math.min(100.0, percent));
+    }
+
+    private String livePercentText(double percent) {
+        double value = clampLivePercent(percent);
+        if (Double.isNaN(value)) return "采样中…";
+        double rounded = Math.round(value * 10.0) / 10.0;
+        if (Math.abs(rounded - Math.rint(rounded)) < 0.0001) return ((int) Math.round(rounded)) + "%";
+        return String.valueOf(rounded) + "%";
+    }
+
+    private int liveMetricColor(double percent) {
+        if (Double.isNaN(percent)) return BLUE;
+        if (percent >= 90.0) return RED;
+        if (percent >= 70.0) return AMBER;
+        return BLUE;
+    }
+
+    private void setLiveMetricBar(LinearLayout bar, double percent) {
+        if (bar == null) return;
+        bar.removeAllViews();
+        double value = clampLivePercent(percent);
+        if (Double.isNaN(value) || value <= 0.0) return;
+
+        View fill = new View(this);
+        fill.setBackground(roundRect(liveMetricColor(value), dp(99), 0, 0));
+        float usedWeight = (float) Math.max(0.1, value);
+        float restWeight = (float) Math.max(0.1, 100.0 - value);
+        bar.addView(fill, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, usedWeight));
+        if (value < 100.0) {
+            View rest = new View(this);
+            rest.setBackgroundColor(Color.TRANSPARENT);
+            bar.addView(rest, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, restWeight));
+        }
+    }
+
+    private double livePercent(JSONObject data, String key, long used, long total) {
+        if (data != null && data.has(key) && !data.isNull(key)) {
+            return clampLivePercent(data.optDouble(key, Double.NaN));
+        }
+        if (total > 0) return clampLivePercent((double) used / (double) total * 100.0);
+        return Double.NaN;
+    }
+
+    private void updateLivePercentMetric(LinearLayout page, String valueTag, String detailTag, String barTag,
+                                         double percent, String detail) {
+        setLiveText(page, valueTag, livePercentText(percent));
+        setLiveText(page, detailTag, detail);
+        setLiveMetricBar(liveTaggedBar(page, barTag), percent);
+    }
+
+    private String liveRate(long bytesPerSecond) {
+        return bytes(Math.max(0L, bytesPerSecond)) + "/s";
+    }
+
+    private String liveUnavailableReason(String status) {
+        String s = status == null ? "" : status.trim().toLowerCase();
+        if ("stopped".equals(s) || "frozen".equals(s)) return "实例未运行";
+        if ("provisioning".equals(s) || "reinstalling".equals(s)) return "实例正在准备中";
+        return "实时数据暂不可用";
+    }
+
+    private void setLiveMetricsUnavailable(LinearLayout page, String reason) {
+        String message = (reason == null || reason.trim().isEmpty()) ? "实时数据暂不可用" : reason.trim();
+        setLiveText(page, TAG_LIVE_CPU_VALUE, "--");
+        setLiveText(page, TAG_LIVE_CPU_DETAIL, message);
+        setLiveMetricBar(liveTaggedBar(page, TAG_LIVE_CPU_BAR), 0.0);
+        setLiveText(page, TAG_LIVE_MEMORY_VALUE, "--");
+        setLiveText(page, TAG_LIVE_MEMORY_DETAIL, message);
+        setLiveMetricBar(liveTaggedBar(page, TAG_LIVE_MEMORY_BAR), 0.0);
+        setLiveText(page, TAG_LIVE_DISK_VALUE, "--");
+        setLiveText(page, TAG_LIVE_DISK_DETAIL, message);
+        setLiveMetricBar(liveTaggedBar(page, TAG_LIVE_DISK_BAR), 0.0);
+        setLiveText(page, TAG_LIVE_RX, "↓ --");
+        setLiveText(page, TAG_LIVE_TX, "↑ --");
+        setLiveText(page, TAG_LIVE_NETWORK_DETAIL, message);
+    }
+
+    private void updateLiveMetrics(LinearLayout page, JSONObject data) {
+        if (data == null) {
+            setLiveMetricsUnavailable(page, "实时数据暂不可用");
+            return;
+        }
+        if (!data.has("available")) {
+            setLiveMetricsUnavailable(page, "当前 Panel 暂不支持实时监控");
+            return;
+        }
+        if (!data.optBoolean("available", false)) {
+            setLiveMetricsUnavailable(page, liveUnavailableReason(data.optString("status", "")));
+            return;
+        }
+
+        double cpu = data.has("cpu_percent") && !data.isNull("cpu_percent")
+                ? clampLivePercent(data.optDouble("cpu_percent", Double.NaN)) : Double.NaN;
+        updateLivePercentMetric(page, TAG_LIVE_CPU_VALUE, TAG_LIVE_CPU_DETAIL, TAG_LIVE_CPU_BAR,
+                cpu, Double.isNaN(cpu) ? "正在计算瞬时使用率" : "当前使用率");
+
+        long memoryUsed = Math.max(0L, data.optLong("memory_used_bytes", 0L));
+        long memoryTotal = Math.max(0L, data.optLong("memory_total_bytes", 0L));
+        double memoryPercent = livePercent(data, "memory_percent", memoryUsed, memoryTotal);
+        String memoryDetail = memoryTotal > 0 ? bytes(memoryUsed) + " / " + bytes(memoryTotal) : "正在读取实例内存";
+        updateLivePercentMetric(page, TAG_LIVE_MEMORY_VALUE, TAG_LIVE_MEMORY_DETAIL, TAG_LIVE_MEMORY_BAR,
+                memoryPercent, memoryDetail);
+
+        long diskUsed = Math.max(0L, data.optLong("disk_used_bytes", 0L));
+        long diskTotal = Math.max(0L, data.optLong("disk_total_bytes", 0L));
+        double diskPercent = livePercent(data, "disk_percent", diskUsed, diskTotal);
+        String diskDetail = diskTotal > 0 ? bytes(diskUsed) + " / " + bytes(diskTotal) : "正在读取系统盘";
+        updateLivePercentMetric(page, TAG_LIVE_DISK_VALUE, TAG_LIVE_DISK_DETAIL, TAG_LIVE_DISK_BAR,
+                diskPercent, diskDetail);
+
+        boolean rxReady = data.has("network_rx_bps") && !data.isNull("network_rx_bps");
+        boolean txReady = data.has("network_tx_bps") && !data.isNull("network_tx_bps");
+        setLiveText(page, TAG_LIVE_RX, rxReady ? "↓ " + liveRate(data.optLong("network_rx_bps", 0L)) : "↓ 采样中…");
+        setLiveText(page, TAG_LIVE_TX, txReady ? "↑ " + liveRate(data.optLong("network_tx_bps", 0L)) : "↑ 采样中…");
+        setLiveText(page, TAG_LIVE_NETWORK_DETAIL,
+                (rxReady && txReady) ? "当前实际下载 / 上传速率" : "正在计算瞬时网络速率");
+    }
+
+    private boolean liveMetricsContextValid(LinearLayout page, int serverId, int generation) {
+        return appResumed
+                && inDetail
+                && generation == screenGeneration
+                && currentDetailServerId == serverId
+                && liveMetricsServerId == serverId
+                && liveMetricsPage == page
+                && liveMetricsPollTask != null;
+    }
+
+    private void startLiveMetricsPolling(LinearLayout page, int serverId) {
+        stopLiveMetricsPolling();
+        if (page == null || serverId <= 0) return;
+
+        final int generation = screenGeneration;
+        liveMetricsPage = page;
+        liveMetricsServerId = serverId;
+        liveMetricsPollTask = new Runnable() {
+            @Override
+            public void run() {
+                if (!liveMetricsContextValid(page, serverId, generation) || liveMetricsPollTask != this) return;
+                io.execute(() -> {
+                    try {
+                        JSONObject metrics = ApiClient.request(baseUrl, "/api/v1/servers/" + serverId + "?metrics=1", "GET", token, null);
+                        main.post(() -> {
+                            if (!liveMetricsContextValid(page, serverId, generation) || liveMetricsPollTask != this) return;
+                            updateLiveMetrics(page, metrics);
+                            main.postDelayed(this, LIVE_METRICS_INTERVAL_MS);
+                        });
+                    } catch (Exception e) {
+                        main.post(() -> {
+                            if (!liveMetricsContextValid(page, serverId, generation) || liveMetricsPollTask != this) return;
+                            if (handleUnauthorized(e)) {
+                                stopLiveMetricsPolling();
+                                return;
+                            }
+                            setLiveMetricsUnavailable(page, "暂时无法获取实时数据");
+                            main.postDelayed(this, LIVE_METRICS_INTERVAL_MS);
+                        });
+                    }
+                });
+            }
+        };
+        if (appResumed) main.post(liveMetricsPollTask);
+    }
+
+    private void stopLiveMetricsPolling() {
+        if (liveMetricsPollTask != null) main.removeCallbacks(liveMetricsPollTask);
+        liveMetricsPollTask = null;
+        liveMetricsPage = null;
+        liveMetricsServerId = 0;
+    }
+
+    private void maybeResumeLiveMetricsPolling() {
+        if (!appResumed || liveMetricsPollTask == null || liveMetricsPage == null || liveMetricsServerId <= 0) return;
+        main.removeCallbacks(liveMetricsPollTask);
+        main.post(liveMetricsPollTask);
     }
 
     private void renderServerDetail(LinearLayout page, JSONObject s) {
@@ -893,6 +1194,9 @@ public class MainActivity extends Activity {
             resource.addView(thinDivider());
             resource.addView(infoRow("虚拟化", blankDash(s.optString("virtualization_type", ""))));
             page.addView(resource, matchWrap());
+            gap(page, 22);
+
+            addLiveMetricsSection(page, s.optInt("id", currentDetailServerId));
             gap(page, 22);
 
             int portCount = s.optInt("port_count", s.optJSONArray("ports") == null ? 0 : s.optJSONArray("ports").length());
@@ -5413,6 +5717,8 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onPause() {
+        appResumed = false;
+        if (liveMetricsPollTask != null) main.removeCallbacks(liveMetricsPollTask);
         pausedAt = System.currentTimeMillis();
         super.onPause();
     }
@@ -5420,6 +5726,8 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        appResumed = true;
+        maybeResumeLiveMetricsPolling();
         String pending = prefs == null ? "" : prefs.getString("pending_update_apk", "");
         if (!pending.isEmpty() && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && getPackageManager().canRequestPackageInstalls()) {
             File apk = new File(pending);
