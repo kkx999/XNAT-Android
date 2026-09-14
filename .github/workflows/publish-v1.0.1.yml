@@ -1,0 +1,103 @@
+name: Publish XNAT Android v1.0.1
+
+on:
+  push:
+    branches:
+      - release/android-1.0.1
+    paths:
+      - .github/workflows/publish-v1.0.1.yml
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      SOURCE_RUN_ID: '34818943200'
+      RELEASE_COMMIT: 'd0f7bf106602fcf8a9f5095887b4a6b5a89ae12d'
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Wait for signed release build
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 100); do
+            STATUS="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${SOURCE_RUN_ID}" --jq '.status')"
+            CONCLUSION="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${SOURCE_RUN_ID}" --jq '.conclusion // ""')"
+            echo "Signed build: ${STATUS} ${CONCLUSION}"
+            if [ "$STATUS" = "completed" ]; then
+              test "$CONCLUSION" = "success"
+              exit 0
+            fi
+            sleep 6
+          done
+          echo 'Timed out waiting for signed build' >&2
+          exit 1
+
+      - name: Download signed APK artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf dist
+          mkdir -p dist
+          gh run download "$SOURCE_RUN_ID" --repo "$GITHUB_REPOSITORY" --name 'XNAT-Android-v1.0.1' --dir dist
+          test -f dist/XNAT-Android-v1.0.1.apk
+          test -f dist/XNAT-Android-v1.0.1.apk.sha256
+          (cd dist && sha256sum -c XNAT-Android-v1.0.1.apk.sha256)
+
+      - name: Create v1.0.1 tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions
+          git config user.email actions@github.com
+          git fetch --tags --force
+          if ! git rev-parse -q --verify refs/tags/v1.0.1 >/dev/null; then
+            git tag -a v1.0.1 "$RELEASE_COMMIT" -m 'XNAT Android v1.0.1'
+            git push origin refs/tags/v1.0.1
+          fi
+          test "$(git rev-list -n 1 v1.0.1)" = "$RELEASE_COMMIT"
+
+      - name: Create GitHub Release
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/notes.md <<'EOF'
+          XNAT Android v1.0.1
+
+          非强制体验更新：
+          - 购买服务器时提前检查系统镜像最低磁盘要求。
+          - 重装系统时提前检查当前系统盘与目标镜像是否兼容。
+          - 不兼容镜像保留显示但置灰，并标注“需 ≥xG”。
+          - Alpine 默认至少 1 GB，Debian / Ubuntu 默认至少 2 GB，KVM 至少 4 GB。
+          - Panel 仍保留最终校验；Mobile API 继续保持 v1。
+          - 保持现有 UI 架构、页面布局、视觉风格和主要交互不变。
+
+          版本：1.0.1（versionCode 10208）
+          EOF
+          if gh release view v1.0.1 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload v1.0.1 dist/XNAT-Android-v1.0.1.apk dist/XNAT-Android-v1.0.1.apk.sha256 --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create v1.0.1 \
+              dist/XNAT-Android-v1.0.1.apk \
+              dist/XNAT-Android-v1.0.1.apk.sha256 \
+              --repo "$GITHUB_REPOSITORY" \
+              --verify-tag \
+              --title 'XNAT Android v1.0.1' \
+              --notes-file /tmp/notes.md
+          fi
+
+      - name: Verify published release
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release view v1.0.1 --repo "$GITHUB_REPOSITORY" --json tagName,isDraft,isPrerelease,assets \
+            --jq 'select(.tagName == "v1.0.1" and .isDraft == false and .isPrerelease == false and ([.assets[].name] | sort) == (["XNAT-Android-v1.0.1.apk","XNAT-Android-v1.0.1.apk.sha256"] | sort))' >/dev/null
