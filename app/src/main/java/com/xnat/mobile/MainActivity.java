@@ -1190,22 +1190,32 @@ public class MainActivity extends Activity {
         final String[] selectedName = {""};
         final int[] selectedIndex = {-1};
         final Button[] nextRef = new Button[1];
+        final double planDiskGb = plan.optDouble("disk_gb", 0);
+        final String planVirtualizationType = plan.optString("virtualization_type", "lxc");
         for (int i = 0; i < images.length(); i++) {
             JSONObject image = images.optJSONObject(i);
             if (image == null) continue;
             final int idx = i;
             final int imageId = image.optInt("id", 0);
             final String imageName = image.optString("name", "系统镜像");
-            LinearLayout option = systemImageOption(imageName, image.optString("alias", ""), false, false);
+            final double requiredDiskGb = minimumImageDiskGb(image, planVirtualizationType);
+            final boolean compatible = planDiskGb <= 0 || planDiskGb + 1e-9 >= requiredDiskGb;
+            LinearLayout option = systemImageOption(imageName, image.optString("alias", ""), false, false, compatible, requiredDiskGb);
             option.setTag("purchase-image-" + i);
+            option.setContentDescription(compatible ? "image-compatible" : "image-incompatible");
             option.setOnClickListener(v -> {
                 subtleHaptic(v);
+                if (!compatible) {
+                    toast(imageName + " 至少需要 " + formatDiskGb(requiredDiskGb) + " GB 系统盘，当前套餐为 " + formatDiskGb(planDiskGb) + " GB");
+                    return;
+                }
                 selectedId[0] = imageId;
                 selectedName[0] = imageName;
                 selectedIndex[0] = idx;
                 for (int x = 0; x < options.getChildCount(); x++) {
                     View child = options.getChildAt(x);
                     if (!(child instanceof LinearLayout)) continue;
+                    if ("image-incompatible".contentEquals(child.getContentDescription())) continue;
                     boolean selected = ("purchase-image-" + selectedIndex[0]).equals(String.valueOf(child.getTag()));
                     child.setBackground(roundRect(selected ? BLUE_SOFT : SOFT, dp(18), selected ? BLUE : 0, selected ? 1 : 0));
                     TextView mark = child.findViewWithTag("image-mark");
@@ -2467,7 +2477,7 @@ public class MainActivity extends Activity {
                 if (images == null || images.length() == 0) throw new Exception("当前没有可用的系统镜像");
                 main.post(() -> {
                     managementActionInProgress = false;
-                    buildReinstallSheet(serverId, serverName, server.optString("os_name", ""), images);
+                    buildReinstallSheet(serverId, serverName, server.optString("os_name", ""), server.optDouble("disk_gb", 0), server.optString("virtualization_type", "lxc"), images);
                 });
             } catch (Exception e) {
                 main.post(() -> {
@@ -2478,7 +2488,7 @@ public class MainActivity extends Activity {
         });
     }
 
-    private void buildReinstallSheet(int serverId, String serverName, String currentOs, JSONArray images) {
+    private void buildReinstallSheet(int serverId, String serverName, String currentOs, double diskGb, String virtualizationType, JSONArray images) {
         Dialog dialog = bottomDialog();
         LinearLayout sheet = bottomSheetBase();
         sheet.addView(text("选择重装系统", 22, INK, true));
@@ -2497,6 +2507,7 @@ public class MainActivity extends Activity {
         current.addView(infoRow("服务器", serverName));
         current.addView(thinDivider());
         current.addView(infoRow("当前系统", blankDash(currentOs)));
+        if (diskGb > 0) { current.addView(thinDivider()); current.addView(infoRow("系统盘", formatDiskGb(diskGb) + " GB")); }
         sheet.addView(current, matchWrap());
         gap(sheet, 14);
 
@@ -2514,16 +2525,24 @@ public class MainActivity extends Activity {
             final int index = i;
             final int imageId = image.optInt("id", 0);
             final String imageName = image.optString("name", image.optString("alias", "系统镜像"));
-            LinearLayout option = systemImageOption(imageName, image.optString("alias", ""), imageName.equalsIgnoreCase(currentOs), false);
+            final double requiredDiskGb = minimumImageDiskGb(image, virtualizationType);
+            final boolean compatible = diskGb <= 0 || diskGb + 1e-9 >= requiredDiskGb;
+            LinearLayout option = systemImageOption(imageName, image.optString("alias", ""), imageName.equalsIgnoreCase(currentOs), false, compatible, requiredDiskGb);
             option.setTag("image-option-" + i);
+            option.setContentDescription(compatible ? "image-compatible" : "image-incompatible");
             option.setOnClickListener(v -> {
                 subtleHaptic(v);
+                if (!compatible) {
+                    toast(imageName + " 至少需要 " + formatDiskGb(requiredDiskGb) + " GB 系统盘，当前服务器为 " + formatDiskGb(diskGb) + " GB");
+                    return;
+                }
                 selectedIndex[0] = index;
                 selectedId[0] = imageId;
                 selectedName[0] = imageName;
                 for (int x = 0; x < options.getChildCount(); x++) {
                     View child = options.getChildAt(x);
                     if (child instanceof LinearLayout) {
+                        if ("image-incompatible".contentEquals(child.getContentDescription())) continue;
                         boolean chosen = ("image-option-" + selectedIndex[0]).equals(String.valueOf(child.getTag()));
                         child.setBackground(roundRect(chosen ? BLUE_SOFT : SOFT, dp(18), chosen ? BLUE : 0, chosen ? 1 : 0));
                         TextView mark = child.findViewWithTag("image-mark");
@@ -2561,9 +2580,23 @@ public class MainActivity extends Activity {
                 toast("请选择要安装的系统");
                 return;
             }
-            buildReinstallConfirmSheet(dialog, serverId, serverName, currentOs, selectedId[0], selectedName[0], images);
+            buildReinstallConfirmSheet(dialog, serverId, serverName, currentOs, diskGb, virtualizationType, selectedId[0], selectedName[0], images);
         });
         showBottomDialog(dialog, sheet);
+    }
+
+    private LinearLayout systemImageOption(String name, String alias, boolean current, boolean selected, boolean compatible, double requiredDiskGb) {
+        LinearLayout option = systemImageOption(name, alias, current, selected);
+        if (!compatible) {
+            option.setAlpha(0.58f);
+            TextView mark = option.findViewWithTag("image-mark");
+            if (mark != null) {
+                mark.setText("需 ≥" + formatDiskGb(requiredDiskGb) + "G");
+                mark.setTextColor(AMBER);
+                mark.setBackground(roundRect(AMBER_SOFT, dp(12), 0, 0));
+            }
+        }
+        return option;
     }
 
     private LinearLayout systemImageOption(String name, String alias, boolean current, boolean selected) {
@@ -2603,7 +2636,7 @@ public class MainActivity extends Activity {
         return option;
     }
 
-    private void buildReinstallConfirmSheet(Dialog dialog, int serverId, String serverName, String currentOs, int imageId, String imageName, JSONArray images) {
+    private void buildReinstallConfirmSheet(Dialog dialog, int serverId, String serverName, String currentOs, double diskGb, String virtualizationType, int imageId, String imageName, JSONArray images) {
         LinearLayout sheet = bottomSheetBase();
         sheet.addView(text("确认重装", 22, INK, true));
         TextView desc = text("请核对目标系统并输入服务器名称完成最后确认。", 12, MUTED, false);
@@ -2639,7 +2672,7 @@ public class MainActivity extends Activity {
         sheet.addView(buttons, matchWrap());
         back.setOnClickListener(v -> {
             dialog.dismiss();
-            buildReinstallSheet(serverId, serverName, currentOs, images);
+            buildReinstallSheet(serverId, serverName, currentOs, diskGb, virtualizationType, images);
         });
         confirm.setOnClickListener(v -> {
             if (!serverName.equals(confirmName.getText().toString().trim())) {
@@ -5208,6 +5241,19 @@ public class MainActivity extends Activity {
 
     private boolean containsChinese(String value) {
         return value != null && value.matches(".*[\u4e00-\u9fff].*");
+    }
+
+    private double minimumImageDiskGb(JSONObject image, String virtualizationType) {
+        double minimum = image == null ? 0 : image.optDouble("min_disk_gb", 0);
+        String alias = image == null ? "" : image.optString("alias", "").trim().toLowerCase(java.util.Locale.US);
+        String family = image == null ? "" : image.optString("family", "").trim().toLowerCase(java.util.Locale.US);
+        if (minimum <= 0) {
+            if (alias.startsWith("images:alpine/") || "alpine".equals(family)) minimum = 1.0;
+            else if (alias.startsWith("images:ubuntu/") || alias.startsWith("images:debian/") || "apt".equals(family)) minimum = 2.0;
+            else minimum = 1.0;
+        }
+        if ("kvm".equalsIgnoreCase(virtualizationType)) minimum = Math.max(minimum, 4.0);
+        return minimum;
     }
 
     private String formatDiskGb(double value) {
