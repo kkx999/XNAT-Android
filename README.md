@@ -2,7 +2,9 @@
 
 > XNAT 官方原生 Android 客户端，通过 **Mobile API v1** 连接 XNAT Panel。
 
-**当前正式版本：v1.0.5**
+> **项目状态：Beta / 测试版** — 当前版本用于持续测试与功能验证，建议配合 XNAT Panel 测试环境使用。
+
+**当前测试版本：v1.0.5（Beta）**
 
 <div align="center">
 
@@ -14,7 +16,7 @@
 
 ## GitHub 自动更新
 
-正式 Release 当前包含：
+当前 Beta Release 包含：
 
 ```text
 XNAT-Android-v1.0.5.apk
@@ -33,7 +35,7 @@ XNAT_GITHUB_REPO=owner/repo
 
 ---
 
-## 正式构建
+## Beta 构建
 
 仓库不保存签名私钥。GitHub Actions 需要配置：
 
@@ -51,7 +53,7 @@ XNAT_KEY_PASSWORD
 3. 使用 `apksigner` 验证 APK 签名；
 4. 生成 APK 与 SHA-256 校验文件。
 
-当前正式构建产物：
+当前 Beta 构建产物：
 
 ```text
 XNAT-Android-v1.0.5.apk

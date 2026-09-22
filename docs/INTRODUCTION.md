@@ -2,14 +2,16 @@
 
 XNAT Android 是 **XNAT 官方原生 Android 客户端**。
 
+> **项目状态：Beta / 测试版** — 当前版本用于持续测试、交互验证与功能迭代，建议优先配合测试环境使用。
+
 客户端通过 **Mobile API v1** 连接 XNAT Panel，为用户提供移动端的服务器管理、套餐购买、订单、充值与工单等常用功能。App 只连接 Panel，不直接访问 Host Agent。
 
-## 当前正式版本
+## 当前测试版本
 
 | 项目 | 版本 |
 | --- | --- |
-| XNAT Android | v1.0.5 |
-| XNAT Panel | v1.1.0 |
+| XNAT Android | v1.0.5（Beta） |
+| XNAT Panel | v1.1.0（Beta） |
 | Mobile API | v1 |
 | Application ID | `com.xnat.mobile` |
 | Min SDK | 26 |
@@ -115,7 +117,7 @@ v1.0.0 是重新整理后的 Android 正式基线：
 
 ## 更新与发布
 
-Android v1.0.5 的 `versionName` 为 `1.0.5`，内部 `versionCode` 为 `10212`。正式 Release 包含：
+Android v1.0.5 的 `versionName` 为 `1.0.5`，内部 `versionCode` 为 `10212`。当前 Beta Release 包含：
 
 ```text
 XNAT-Android-v1.0.5.apk
@@ -128,7 +130,7 @@ App 使用 GitHub `releases/latest` 检查正式版本，因此开发版或 RC �
 
 Release 构建默认禁止明文 HTTP Panel；正式使用建议始终配置 HTTPS。Debug 构建可临时连接 HTTP Panel，App 会在发送凭据前提示风险。
 
-仓库不保存正式签名私钥。正式版本应持续使用同一套签名证书，以保证后续版本能够覆盖安装并保留本地登录、主题和设置。
+仓库不保存正式签名私钥。Beta 版本也应持续使用同一套签名证书，以保证后续版本能够覆盖安装并保留本地登录、主题和设置。
 
 ---
 
