@@ -8,8 +8,8 @@ XNAT Android 是 **XNAT 官方原生 Android 客户端**。
 
 | 项目 | 版本 |
 | --- | --- |
-| XNAT Android | v1.0.3 |
-| XNAT Panel | v1.0.5 |
+| XNAT Android | v1.0.4 |
+| XNAT Panel | v1.0.8 |
 | Mobile API | v1 |
 | Application ID | `com.xnat.mobile` |
 | Min SDK | 26 |
@@ -17,11 +17,13 @@ XNAT Android 是 **XNAT 官方原生 Android 客户端**。
 
 ## 版本说明
 
-v1.0.3 新增服务器详情实时资源监控，通过 Mobile API v1 从 Panel 读取 CPU、内存、硬盘与实时下载 / 上传速率。监控每 5 秒刷新，离开详情页或 App 进入后台后停止轮询，不在客户端保存监控历史；连接旧 Panel 时安全降级为暂不可用。
+v1.0.4 配套 XNAT Panel v1.0.8，新增每台 VPS 的自动续费开关，并在重装 / 删除确认页加入机器编号一键填入。自动续费仍由 Panel 保存和执行，Android 只通过 Mobile API v1 读取和修改状态。
 
-CPU、内存、硬盘采用与现有 Android 视觉体系一致的全圆角胶囊进度条，网络单独显示上下行瞬时速率。App 仍只连接 Panel，不直接访问 Host Agent。其他页面、系统镜像磁盘策略与现有主要交互保持不变。
+实时资源监控调整为 3 秒刷新：CPU、内存保持双列，硬盘改为整行，实时网络独立整行显示下载 / 上传瞬时速率，并使用“● 实时”状态提示。离开详情页或 App 进入后台后继续自动停止轮询，不保存监控历史。
 
-v1.0.2 是系统镜像最低系统盘策略同步更新。购买和重装继续保留提前兼容提示，但最低磁盘不再由 Android 按发行版写死，而是直接读取 XNAT Panel v1.0.5 的 Mobile API v1 `/api/v1/system-images` 下发的 `min_disk_gb`。
+危险操作的一键填入只填写确认框，不会自动执行重装或删除；删除提示同步 Panel-only 行为，明确不会连接或删除 Host 上可能仍存在的实例。
+
+v1.0.2 是系统镜像最低系统盘策略同步更新。购买和重装继续保留提前兼容提示，但最低磁盘不再由 Android 按发行版写死，而是直接读取 XNAT Panel v1.0.8 的 Mobile API v1 `/api/v1/system-images` 下发的 `min_disk_gb`。
 
 LXC 直接使用 Panel 配置；KVM 在 Panel 返回有效最低磁盘时仅保留与 Panel v1.0.3 一致的 3 GiB 技术底线。连接旧 Panel 且未返回 `min_disk_gb` 时，Android 不做本地误拦截，最终仍由 Panel 后端校验。Host Agent API v2 属于 Panel ↔ Host 内部通信，Android 不直接接触 Host Agent。现有 UI 架构、页面布局、视觉风格和主要交互保持不变。
 
@@ -29,7 +31,9 @@ LXC 直接使用 Panel 配置；KVM 在 Panel 返回有效最低磁盘时仅保�
 
 - **连接 XNAT Panel**：填写 Panel 地址并登录，后续请求统一走 Mobile API v1。
 - **查看账户与服务器**：首页展示账户概况、服务器列表与主要资源信息。
-- **实时资源监控**：服务器详情显示 CPU、内存、硬盘与实时下载 / 上传速率，5 秒刷新并在后台自动停止。
+- **实时资源监控**：服务器详情显示 CPU、内存、硬盘与实时下载 / 上传速率，3 秒刷新并在后台自动停止。
+- **自动续费**：支持在服务器详情直接开启 / 关闭单台 VPS 自动续费。
+- **危险操作确认**：重装与删除确认页可一键填入机器编号，但最终操作仍需用户手动确认。
 - **管理服务器**：支持开机、关机、重启、重装系统、删除等常用操作。
 - **购买与订单**：浏览 Panel 动态下发的套餐和系统镜像，并完成购买、续费及订单查看。
 - **系统镜像兼容提示**：购买和重装前检查当前系统盘是否满足目标镜像要求。
@@ -44,7 +48,7 @@ XNAT Android
      │
      │ HTTPS / Mobile API v1
      ▼
-XNAT Panel v1.0.5
+XNAT Panel v1.0.8
      │
      │ Agent API v2
      ▼
@@ -54,6 +58,16 @@ Host Agent / Incus
 Android 客户端不保存或使用 Host Agent Token，也不会直接连接 Host 管理端口。服务器、套餐、系统镜像与业务状态均由 Panel 统一下发。
 
 ## 更新记录
+
+### v1.0.4
+
+- 服务器详情新增 iOS 风格自动续费开关，通过 Mobile API v1 与 Panel v1.0.8 同步状态。
+- 自动续费保存使用即时反馈；失败自动回滚开关状态，避免界面与服务端不一致。
+- 实时资源监控刷新间隔由 5 秒调整为 3 秒，并用“● 实时”状态提示替代固定刷新文案。
+- CPU / 内存保持双列，硬盘改为整行；实时网络独立整行，下载 / 上传使用等宽布局。
+- 重装和删除确认页新增“填入编号”，仅填写机器编号，不自动触发危险操作。
+- 删除说明同步 Panel-only 语义：删除 Panel 记录时不会连接或删除 Host 上可能仍存在的实例。
+- 继续使用 Mobile API v1；连接旧 Panel 时自动续费入口安全降级为不可用。
 
 ### v1.0.3
 
@@ -96,11 +110,11 @@ v1.0.0 是重新整理后的 Android 正式基线：
 
 ## 更新与发布
 
-Android v1.0.3 的 `versionName` 为 `1.0.3`，内部 `versionCode` 为 `10210`。正式 Release 包含：
+Android v1.0.4 的 `versionName` 为 `1.0.4`，内部 `versionCode` 为 `10211`。正式 Release 包含：
 
 ```text
-XNAT-Android-v1.0.3.apk
-XNAT-Android-v1.0.3.apk.sha256
+XNAT-Android-v1.0.4.apk
+XNAT-Android-v1.0.4.apk.sha256
 ```
 
 App 使用 GitHub `releases/latest` 检查正式版本，因此开发版或 RC 应发布为 **Pre-release**，不会作为正式更新推送。

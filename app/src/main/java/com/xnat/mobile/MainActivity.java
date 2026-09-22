@@ -111,7 +111,7 @@ public class MainActivity extends Activity {
     private boolean actionInProgress = false;
     private boolean managementActionInProgress = false;
     private long lastBackPressAt = 0L;
-    private static final long LIVE_METRICS_INTERVAL_MS = 5000L;
+    private static final long LIVE_METRICS_INTERVAL_MS = 3000L;
     private static final String TAG_LIVE_CPU_VALUE = "xnat_live_cpu_value";
     private static final String TAG_LIVE_CPU_DETAIL = "xnat_live_cpu_detail";
     private static final String TAG_LIVE_CPU_BAR = "xnat_live_cpu_bar";
@@ -865,31 +865,68 @@ public class MainActivity extends Activity {
         return cell;
     }
 
-    private LinearLayout liveNetworkCell() {
+    private LinearLayout liveNetworkRateCell(String label, String arrow, String valueTag) {
         LinearLayout cell = column();
-        cell.setPadding(dp(4), dp(2), dp(4), dp(2));
-        cell.addView(text("实时网络", 11, MUTED, true));
+        TextView labelView = text(arrow + "  " + label, 10, MUTED, true);
+        cell.addView(labelView, matchWrap());
 
-        TextView rx = text("↓ 采样中…", 17, INK, true);
-        rx.setTag(TAG_LIVE_RX);
-        rx.setPadding(0, dp(4), 0, 0);
-        cell.addView(rx, matchWrap());
-
-        TextView tx = text("↑ 采样中…", 14, INK, true);
-        tx.setTag(TAG_LIVE_TX);
-        tx.setPadding(0, dp(3), 0, 0);
-        cell.addView(tx, matchWrap());
-
-        TextView detail = text("当前实际下载 / 上传速率", 10, MUTED, false);
-        detail.setTag(TAG_LIVE_NETWORK_DETAIL);
-        detail.setPadding(0, dp(5), 0, 0);
-        cell.addView(detail, matchWrap());
+        TextView value = text("采样中…", 18, INK, true);
+        value.setTag(valueTag);
+        value.setPadding(0, dp(5), 0, 0);
+        cell.addView(value, matchWrap());
         return cell;
+    }
+
+    private LinearLayout liveNetworkPanel() {
+        LinearLayout block = column();
+        block.setPadding(dp(4), dp(1), dp(4), dp(1));
+
+        LinearLayout title = horizontalRow();
+        title.setGravity(Gravity.CENTER_VERTICAL);
+        title.addView(text("实时网络", 11, MUTED, true), new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        TextView unit = text("瞬时速率", 9, MUTED, false);
+        title.addView(unit);
+        block.addView(title, matchWrap());
+
+        gap(block, 10);
+        LinearLayout rates = horizontalRow();
+        rates.setGravity(Gravity.TOP);
+        rates.addView(liveNetworkRateCell("下载", "↓", TAG_LIVE_RX), weighted());
+
+        View divider = new View(this);
+        divider.setBackgroundColor(BORDER);
+        LinearLayout.LayoutParams dividerLp = new LinearLayout.LayoutParams(dp(1), dp(42));
+        dividerLp.leftMargin = dp(12);
+        dividerLp.rightMargin = dp(12);
+        dividerLp.gravity = Gravity.CENTER_VERTICAL;
+        rates.addView(divider, dividerLp);
+
+        rates.addView(liveNetworkRateCell("上传", "↑", TAG_LIVE_TX), weighted());
+        block.addView(rates, matchWrap());
+
+        TextView detail = text("正在计算瞬时网络速率", 9, MUTED, false);
+        detail.setTag(TAG_LIVE_NETWORK_DETAIL);
+        detail.setPadding(0, dp(9), 0, 0);
+        block.addView(detail, matchWrap());
+        return block;
+    }
+
+    private LinearLayout liveMetricsHeader() {
+        LinearLayout row = horizontalRow();
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout block = column();
+        block.addView(text("实时资源监控", 20, INK, true));
+        TextView sub = text("当前实例 CPU、内存、硬盘与网络速率", 11, MUTED, false);
+        sub.setPadding(0, dp(2), 0, 0);
+        block.addView(sub);
+        row.addView(block, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        row.addView(pill("● 实时", GREEN, GREEN_SOFT));
+        return row;
     }
 
     private void addLiveMetricsSection(LinearLayout page, int serverId) {
         int targetId = serverId > 0 ? serverId : currentDetailServerId;
-        page.addView(sectionHeader("实时资源监控", "当前实例 CPU、内存、硬盘与网络速率", "5 秒刷新"), matchWrap());
+        page.addView(liveMetricsHeader(), matchWrap());
         gap(page, 10);
 
         LinearLayout panel = surfaceCard(18);
@@ -908,13 +945,14 @@ public class MainActivity extends Activity {
         panel.addView(thinDivider());
         gap(panel, 13);
 
-        LinearLayout row2 = horizontalRow();
-        row2.setGravity(Gravity.TOP);
-        row2.addView(liveMetricCell("硬盘使用", "采样中…", "正在读取系统盘",
-                TAG_LIVE_DISK_VALUE, TAG_LIVE_DISK_DETAIL, TAG_LIVE_DISK_BAR), weighted());
-        gapH(row2, 14);
-        row2.addView(liveNetworkCell(), weighted());
-        panel.addView(row2, matchWrap());
+        panel.addView(liveMetricCell("硬盘使用", "采样中…", "正在读取系统盘",
+                TAG_LIVE_DISK_VALUE, TAG_LIVE_DISK_DETAIL, TAG_LIVE_DISK_BAR), matchWrap());
+
+        gap(panel, 13);
+        panel.addView(thinDivider());
+        gap(panel, 13);
+
+        panel.addView(liveNetworkPanel(), matchWrap());
 
         page.addView(panel, matchWrap());
         startLiveMetricsPolling(page, targetId);
@@ -1012,8 +1050,8 @@ public class MainActivity extends Activity {
         setLiveText(page, TAG_LIVE_DISK_VALUE, "--");
         setLiveText(page, TAG_LIVE_DISK_DETAIL, message);
         setLiveMetricBar(liveTaggedBar(page, TAG_LIVE_DISK_BAR), 0.0);
-        setLiveText(page, TAG_LIVE_RX, "↓ --");
-        setLiveText(page, TAG_LIVE_TX, "↑ --");
+        setLiveText(page, TAG_LIVE_RX, "--");
+        setLiveText(page, TAG_LIVE_TX, "--");
         setLiveText(page, TAG_LIVE_NETWORK_DETAIL, message);
     }
 
@@ -1052,10 +1090,10 @@ public class MainActivity extends Activity {
 
         boolean rxReady = data.has("network_rx_bps") && !data.isNull("network_rx_bps");
         boolean txReady = data.has("network_tx_bps") && !data.isNull("network_tx_bps");
-        setLiveText(page, TAG_LIVE_RX, rxReady ? "↓ " + liveRate(data.optLong("network_rx_bps", 0L)) : "↓ 采样中…");
-        setLiveText(page, TAG_LIVE_TX, txReady ? "↑ " + liveRate(data.optLong("network_tx_bps", 0L)) : "↑ 采样中…");
+        setLiveText(page, TAG_LIVE_RX, rxReady ? liveRate(data.optLong("network_rx_bps", 0L)) : "采样中…");
+        setLiveText(page, TAG_LIVE_TX, txReady ? liveRate(data.optLong("network_tx_bps", 0L)) : "采样中…");
         setLiveText(page, TAG_LIVE_NETWORK_DETAIL,
-                (rxReady && txReady) ? "当前实际下载 / 上传速率" : "正在计算瞬时网络速率");
+                (rxReady && txReady) ? "下载 / 上传均为当前瞬时速率" : "正在计算瞬时网络速率");
     }
 
     private boolean liveMetricsContextValid(LinearLayout page, int serverId, int generation) {
@@ -1236,6 +1274,8 @@ public class MainActivity extends Activity {
             }
             page.addView(life, matchWrap());
             gap(page, 10);
+            page.addView(autoRenewCard(s), matchWrap());
+            gap(page, 10);
             page.addView(trafficResetCard(s), matchWrap());
             gap(page, 22);
 
@@ -1245,7 +1285,7 @@ public class MainActivity extends Activity {
             systemCard.setPadding(dp(16), dp(14), dp(16), dp(14));
             systemCard.addView(infoRow("当前系统", blankDash(s.optString("os_name", ""))));
             systemCard.addView(thinDivider());
-            TextView warning = text("重装系统会清空系统盘；删除服务器会永久移除实例。请确认数据已备份。", 12, RED, false);
+            TextView warning = text("重装系统会清空系统盘；删除服务器仅从 Panel 移除记录，不会连接或操作 Host。", 12, RED, false);
             warning.setPadding(0, dp(12), 0, dp(12));
             systemCard.addView(warning);
             LinearLayout buttons = horizontalRow();
@@ -2946,7 +2986,7 @@ public class MainActivity extends Activity {
     private void buildReinstallConfirmSheet(Dialog dialog, int serverId, String serverName, String currentOs, double diskGb, String virtualizationType, int imageId, String imageName, JSONArray images) {
         LinearLayout sheet = bottomSheetBase();
         sheet.addView(text("确认重装", 22, INK, true));
-        TextView desc = text("请核对目标系统并输入服务器名称完成最后确认。", 12, MUTED, false);
+        TextView desc = text("请核对目标系统并填入机器编号完成最后确认。", 12, MUTED, false);
         desc.setPadding(0, dp(5), 0, dp(12));
         sheet.addView(desc);
 
@@ -2966,8 +3006,8 @@ public class MainActivity extends Activity {
         sheet.addView(warning, matchWrap());
         gap(sheet, 12);
 
-        EditText confirmName = input("输入服务器名称确认：" + serverName, InputType.TYPE_CLASS_TEXT);
-        sheet.addView(confirmName, matchWrap());
+        EditText confirmName = input("输入机器编号确认：" + serverName, InputType.TYPE_CLASS_TEXT);
+        sheet.addView(confirmationInputRow(confirmName, serverName), matchWrap());
         gap(sheet, 18);
 
         LinearLayout buttons = horizontalRow();
@@ -2983,7 +3023,7 @@ public class MainActivity extends Activity {
         });
         confirm.setOnClickListener(v -> {
             if (!serverName.equals(confirmName.getText().toString().trim())) {
-                toast("请输入完整服务器名称 “" + serverName + "” 进行确认");
+                toast("请填入完整机器编号 “" + serverName + "” 进行确认");
                 return;
             }
             dialog.dismiss();
@@ -3283,16 +3323,16 @@ public class MainActivity extends Activity {
         Dialog dialog = bottomDialog();
         LinearLayout sheet = bottomSheetBase();
         sheet.addView(text("删除服务器", 22, RED, true));
-        TextView desc = text("删除后实例与系统盘将永久移除，操作无法撤销。", 12, MUTED, false);
+        TextView desc = text("删除后该服务器会从 Panel 中永久移除；不会连接 Host，也不会删除 Host 上可能仍存在的实例。", 12, MUTED, false);
         desc.setPadding(0, dp(5), 0, dp(14));
         sheet.addView(desc);
         LinearLayout warning = roundedBox(RED_SOFT, 14, 0, 0);
         warning.setPadding(dp(13), dp(11), dp(13), dp(11));
-        warning.addView(text("请输入稳定编号 “" + displayId + "” 确认删除。", 12, RED, true));
+        warning.addView(text("请填入机器编号 “" + displayId + "” 确认从 Panel 删除。", 12, RED, true));
         sheet.addView(warning, matchWrap());
         gap(sheet, 12);
-        EditText confirmInput = input(displayId, InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS);
-        sheet.addView(confirmInput, matchWrap());
+        EditText confirmInput = input("输入机器编号确认：" + displayId, InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS);
+        sheet.addView(confirmationInputRow(confirmInput, displayId), matchWrap());
         gap(sheet, 18);
         LinearLayout buttons = horizontalRow();
         Button cancel = sheetButton("取消", INK, SOFT, BORDER);
@@ -3305,7 +3345,7 @@ public class MainActivity extends Activity {
         confirm.setOnClickListener(v -> {
             String typed = confirmInput.getText().toString().trim();
             if (!displayId.equalsIgnoreCase(typed)) {
-                toast("请输入完整稳定编号 “" + displayId + "”");
+                toast("请填入完整机器编号 “" + displayId + "”");
                 return;
             }
             dialog.dismiss();
@@ -4671,6 +4711,143 @@ public class MainActivity extends Activity {
             }
         });
         showBottomDialog(dialog, sheet);
+    }
+
+    private LinearLayout confirmationInputRow(EditText input, String value) {
+        LinearLayout row = horizontalRow();
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.addView(input, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        gapH(row, 9);
+        Button fill = sheetButton("填入编号", BLUE, BLUE_SOFT, 0);
+        fill.setTextSize(12);
+        fill.setOnClickListener(v -> {
+            subtleHaptic(fill);
+            input.setText(value);
+            input.setSelection(input.length());
+            input.requestFocus();
+            toast("机器编号已填入");
+        });
+        row.addView(fill, new LinearLayout.LayoutParams(dp(96), ViewGroup.LayoutParams.WRAP_CONTENT));
+        return row;
+    }
+
+    private LinearLayout autoRenewCard(JSONObject server) {
+        LinearLayout card = surfaceCard(18);
+        card.setPadding(dp(16), dp(12), dp(14), dp(12));
+
+        LinearLayout row = horizontalRow();
+        row.setGravity(Gravity.CENTER_VERTICAL);
+
+        LinearLayout copy = column();
+        copy.addView(text("自动续费", 13, INK, true));
+        boolean supported = server.has("auto_renew") && !server.isNull("auto_renew");
+        boolean initial = supported && server.optBoolean("auto_renew", false);
+        TextView status = text(supported ? (initial ? "已开启 · 到期自动从余额续费" : "已关闭 · 可随时开启") : "当前 Panel 暂不支持", 10, MUTED, false);
+        status.setPadding(0, dp(4), 0, 0);
+        copy.addView(status);
+        row.addView(copy, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+
+        AutoRenewSwitch toggle = new AutoRenewSwitch(initial);
+        toggle.setEnabled(supported);
+        toggle.setAlpha(supported ? 1f : 0.42f);
+        row.addView(toggle, new LinearLayout.LayoutParams(dp(48), dp(28)));
+        card.addView(row, matchWrap());
+
+        if (supported) {
+            int serverId = server.optInt("id", 0);
+            toggle.setOnClickListener(v -> {
+                if (toggle.isBusy() || serverId <= 0) return;
+                subtleHaptic(toggle);
+                boolean previous = toggle.isChecked();
+                boolean desired = !previous;
+                toggle.setChecked(desired, true);
+                toggle.setBusy(true);
+                status.setText("正在保存…");
+
+                io.execute(() -> {
+                    try {
+                        JSONObject body = new JSONObject().put("enabled", desired);
+                        JSONObject out = ApiClient.request(baseUrl, "/api/v1/servers/" + serverId + "/auto-renew", "POST", token, body);
+                        boolean saved = out.optBoolean("enabled", desired);
+                        server.put("auto_renew", saved);
+                        JSONObject cached = cachedServerDetails.get(serverId);
+                        if (cached != null) cached.put("auto_renew", saved);
+                        main.post(() -> {
+                            toggle.setBusy(false);
+                            toggle.setChecked(saved, true);
+                            status.setText(saved ? "已开启 · 到期自动从余额续费" : "已关闭 · 可随时开启");
+                            toast(saved ? "自动续费已开启" : "自动续费已关闭");
+                        });
+                    } catch (Exception e) {
+                        main.post(() -> {
+                            toggle.setBusy(false);
+                            toggle.setChecked(previous, true);
+                            status.setText(previous ? "已开启 · 到期自动从余额续费" : "已关闭 · 可随时开启");
+                            if (!handleUnauthorized(e)) toast(mobileApiFeatureMessage(e, "自动续费"));
+                        });
+                    }
+                });
+            });
+        }
+        return card;
+    }
+
+    private final class AutoRenewSwitch extends FrameLayout {
+        private final View knob;
+        private boolean checked;
+        private boolean busy;
+
+        AutoRenewSwitch(boolean initial) {
+            super(MainActivity.this);
+            checked = initial;
+            setClickable(true);
+            setFocusable(true);
+            setPadding(dp(3), dp(3), dp(3), dp(3));
+            setBackground(roundRect(initial ? BLUE : SOFT, dp(99), initial ? BLUE : BORDER, 1));
+
+            knob = new View(MainActivity.this);
+            knob.setBackground(roundRect(Color.WHITE, dp(99), 0, 0));
+            knob.setElevation(dp(2));
+            FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(dp(20), dp(20));
+            lp.gravity = Gravity.START | Gravity.CENTER_VERTICAL;
+            addView(knob, lp);
+            post(() -> positionKnob(false));
+            setContentDescription("自动续费，" + (initial ? "已开启" : "已关闭"));
+        }
+
+        boolean isChecked() {
+            return checked;
+        }
+
+        boolean isBusy() {
+            return busy;
+        }
+
+        void setBusy(boolean value) {
+            busy = value;
+            setAlpha(value ? 0.62f : 1f);
+        }
+
+        void setChecked(boolean value, boolean animated) {
+            checked = value;
+            setBackground(roundRect(value ? BLUE : SOFT, dp(99), value ? BLUE : BORDER, 1));
+            setContentDescription("自动续费，" + (value ? "已开启" : "已关闭"));
+            positionKnob(animated);
+        }
+
+        private void positionKnob(boolean animated) {
+            float target = checked ? dp(22) : 0f;
+            knob.animate().cancel();
+            if (!animated) {
+                knob.setTranslationX(target);
+                return;
+            }
+            knob.animate()
+                    .translationX(target)
+                    .setDuration(220L)
+                    .setInterpolator(new OvershootInterpolator(0.35f))
+                    .start();
+        }
     }
 
     private String profileInitial(String value) {

@@ -62,8 +62,8 @@ jobs:
           from pathlib import Path
 
           gradle = Path('app/build.gradle').read_text()
-          assert "versionCode 10210" in gradle
-          assert "versionName '1.0.3'" in gradle
+          assert "versionCode 10211" in gradle
+          assert "versionName '1.0.4'" in gradle
 
           src = Path('app/src/main/java/com/xnat/mobile/MainActivity.java').read_text()
           start = src.index('    private double minimumImageDiskGb(')
@@ -84,14 +84,24 @@ jobs:
           assert '"/api/v1/system-images"' in catalog_loader
           assert 'data.put("system_images", dynamicImages)' in catalog_loader
 
-          assert 'LIVE_METRICS_INTERVAL_MS = 5000L' in src
+          assert 'LIVE_METRICS_INTERVAL_MS = 3000L' in src
           assert '"/api/v1/servers/" + serverId + "?metrics=1"' in src
           assert 'addLiveMetricsSection(page, s.optInt("id", currentDetailServerId))' in src
           assert 'CPU 使用率' in src
           assert '内存使用' in src
           assert '硬盘使用' in src
           assert '实时网络' in src
+          assert '● 实时' in src
+          assert 'liveNetworkRateCell("下载", "↓", TAG_LIVE_RX)' in src
+          assert 'liveNetworkRateCell("上传", "↑", TAG_LIVE_TX)' in src
           assert 'network_rx_bps' in src and 'network_tx_bps' in src
+          assert 'autoRenewCard(s)' in src
+          assert '"/auto-renew"' in src
+          assert 'AutoRenewSwitch' in src
+          assert 'confirmationInputRow(confirmName, serverName)' in src
+          assert 'confirmationInputRow(confirmInput, displayId)' in src
+          assert '机器编号已填入' in src
+          assert '不会连接或操作 Host' in src
           assert 'appResumed = false' in src
           assert 'maybeResumeLiveMetricsPolling()' in src
           assert 'stopLiveMetricsPolling()' in src
@@ -99,12 +109,12 @@ jobs:
 
           readme = Path('README.md').read_text()
           intro = Path('docs/INTRODUCTION.md').read_text()
-          assert '当前正式版本：v1.0.3' in readme
-          assert 'XNAT Android | v1.0.3' in intro
-          assert 'XNAT Panel | v1.0.5' in intro
+          assert '当前正式版本：v1.0.4' in readme
+          assert 'XNAT Android | v1.0.4' in intro
+          assert 'XNAT Panel | v1.0.8' in intro
           assert '实时资源监控' in intro
           assert 'Mobile API v1' in intro
-          print('Android v1.0.3 live metrics + dynamic image policy verified')
+          print('Android v1.0.4 auto-renew + live metrics + confirmation UX verified')
           PY
 
       - name: Restore release signing key
@@ -158,8 +168,8 @@ jobs:
           set -euo pipefail
           VERSION_NAME="$(sed -nE "s/^[[:space:]]*versionName[[:space:]]+['\"]([^'\"]+)['\"].*/\1/p" app/build.gradle | head -n 1)"
           VERSION_CODE="$(sed -nE 's/^[[:space:]]*versionCode[[:space:]]+([0-9]+).*/\1/p' app/build.gradle | head -n 1)"
-          test "$VERSION_NAME" = "1.0.3"
-          test "$VERSION_CODE" = "10210"
+          test "$VERSION_NAME" = "1.0.4"
+          test "$VERSION_CODE" = "10211"
           echo "XNAT_VERSION_NAME=$VERSION_NAME" >> "$GITHUB_ENV"
           echo "XNAT_VERSION_CODE=$VERSION_CODE" >> "$GITHUB_ENV"
 
@@ -172,7 +182,7 @@ jobs:
           git rm scripts/release-request.py
           git add app/build.gradle app/src/main/java/com/xnat/mobile/MainActivity.java README.md docs/INTRODUCTION.md
           git diff --cached --check
-          git commit -m 'release: XNAT Android v1.0.3'
+          git commit -m 'release: XNAT Android v1.0.4'
           git push origin HEAD:main
 
       - name: Prepare release artifacts
