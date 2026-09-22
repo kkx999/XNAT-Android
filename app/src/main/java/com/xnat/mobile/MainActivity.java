@@ -1285,7 +1285,7 @@ public class MainActivity extends Activity {
             systemCard.setPadding(dp(16), dp(14), dp(16), dp(14));
             systemCard.addView(infoRow("当前系统", blankDash(s.optString("os_name", ""))));
             systemCard.addView(thinDivider());
-            TextView warning = text("重装系统会清空系统盘；删除服务器仅从 Panel 移除记录，不会连接或操作 Host。", 12, RED, false);
+            TextView warning = text("重装系统会清空系统盘；删除服务器会永久删除 Host 上的真实实例，成功后再从 Panel 清理。", 12, RED, false);
             warning.setPadding(0, dp(12), 0, dp(12));
             systemCard.addView(warning);
             LinearLayout buttons = horizontalRow();
@@ -3323,12 +3323,12 @@ public class MainActivity extends Activity {
         Dialog dialog = bottomDialog();
         LinearLayout sheet = bottomSheetBase();
         sheet.addView(text("删除服务器", 22, RED, true));
-        TextView desc = text("删除后该服务器会从 Panel 中永久移除；不会连接 Host，也不会删除 Host 上可能仍存在的实例。", 12, MUTED, false);
+        TextView desc = text("删除会永久移除 Host 上的 VPS、系统盘和端口转发；只有 Host 确认删除成功后，Panel 才会清理该服务器记录。", 12, MUTED, false);
         desc.setPadding(0, dp(5), 0, dp(14));
         sheet.addView(desc);
         LinearLayout warning = roundedBox(RED_SOFT, 14, 0, 0);
         warning.setPadding(dp(13), dp(11), dp(13), dp(11));
-        warning.addView(text("请填入机器编号 “" + displayId + "” 确认从 Panel 删除。", 12, RED, true));
+        warning.addView(text("请填入机器编号 “" + displayId + "” 确认永久删除真实实例。", 12, RED, true));
         sheet.addView(warning, matchWrap());
         gap(sheet, 12);
         EditText confirmInput = input("输入机器编号确认：" + displayId, InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS);
@@ -3336,7 +3336,7 @@ public class MainActivity extends Activity {
         gap(sheet, 18);
         LinearLayout buttons = horizontalRow();
         Button cancel = sheetButton("取消", INK, SOFT, BORDER);
-        Button confirm = sheetButton("永久删除", Color.WHITE, RED, 0);
+        Button confirm = sheetButton("永久删除实例", Color.WHITE, RED, 0);
         buttons.addView(cancel, weighted());
         gapH(buttons, 10);
         buttons.addView(confirm, weighted());

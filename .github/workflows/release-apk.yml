@@ -62,8 +62,8 @@ jobs:
           from pathlib import Path
 
           gradle = Path('app/build.gradle').read_text()
-          assert "versionCode 10211" in gradle
-          assert "versionName '1.0.4'" in gradle
+          assert "versionCode 10212" in gradle
+          assert "versionName '1.0.5'" in gradle
 
           src = Path('app/src/main/java/com/xnat/mobile/MainActivity.java').read_text()
           start = src.index('    private double minimumImageDiskGb(')
@@ -101,7 +101,10 @@ jobs:
           assert 'confirmationInputRow(confirmName, serverName)' in src
           assert 'confirmationInputRow(confirmInput, displayId)' in src
           assert '机器编号已填入' in src
-          assert '不会连接或操作 Host' in src
+          assert '删除服务器会永久删除 Host 上的真实实例' in src
+          assert '只有 Host 确认删除成功后，Panel 才会清理该服务器记录' in src
+          assert '不会连接或操作 Host' not in src
+          assert '不会连接 Host，也不会删除 Host' not in src
           assert 'appResumed = false' in src
           assert 'maybeResumeLiveMetricsPolling()' in src
           assert 'stopLiveMetricsPolling()' in src
@@ -109,12 +112,12 @@ jobs:
 
           readme = Path('README.md').read_text()
           intro = Path('docs/INTRODUCTION.md').read_text()
-          assert '当前正式版本：v1.0.4' in readme
-          assert 'XNAT Android | v1.0.4' in intro
-          assert 'XNAT Panel | v1.0.8' in intro
+          assert '当前正式版本：v1.0.5' in readme
+          assert 'XNAT Android | v1.0.5' in intro
+          assert 'XNAT Panel | v1.1.0' in intro
           assert '实时资源监控' in intro
           assert 'Mobile API v1' in intro
-          print('Android v1.0.4 auto-renew + live metrics + confirmation UX verified')
+          print('Android v1.0.5 Host-first delete semantics verified')
           PY
 
       - name: Restore release signing key
@@ -168,8 +171,8 @@ jobs:
           set -euo pipefail
           VERSION_NAME="$(sed -nE "s/^[[:space:]]*versionName[[:space:]]+['\"]([^'\"]+)['\"].*/\1/p" app/build.gradle | head -n 1)"
           VERSION_CODE="$(sed -nE 's/^[[:space:]]*versionCode[[:space:]]+([0-9]+).*/\1/p' app/build.gradle | head -n 1)"
-          test "$VERSION_NAME" = "1.0.4"
-          test "$VERSION_CODE" = "10211"
+          test "$VERSION_NAME" = "1.0.5"
+          test "$VERSION_CODE" = "10212"
           echo "XNAT_VERSION_NAME=$VERSION_NAME" >> "$GITHUB_ENV"
           echo "XNAT_VERSION_CODE=$VERSION_CODE" >> "$GITHUB_ENV"
 
@@ -182,7 +185,7 @@ jobs:
           git rm scripts/release-request.py
           git add app/build.gradle app/src/main/java/com/xnat/mobile/MainActivity.java README.md docs/INTRODUCTION.md
           git diff --cached --check
-          git commit -m 'release: XNAT Android v1.0.4'
+          git commit -m 'release: XNAT Android v1.0.5'
           git push origin HEAD:main
 
       - name: Prepare release artifacts
